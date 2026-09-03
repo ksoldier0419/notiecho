@@ -34,6 +34,7 @@ class _RecordScreenState extends State<RecordScreen>
   bool _hasResult = false;
   bool _lookingUp = false;
   String? _myVoicePath;
+  String? _nativeAudioUrl;
   final Set<String> _selectedTags = {};
   String _statusMessage = '녹음 버튼을 누르고 단어를 말하세요';
 
@@ -76,6 +77,7 @@ class _RecordScreenState extends State<RecordScreen>
       _wordCtrl.clear();
       _meaningCtrl.clear();
       _myVoicePath = null;
+      _nativeAudioUrl = null;
       _statusMessage = '듣고 있어요... 단어를 말하세요 🎙';
       _isListening = true;
     });
@@ -124,12 +126,13 @@ class _RecordScreenState extends State<RecordScreen>
     final word = _wordCtrl.text.trim();
     if (word.isEmpty) return;
     setState(() => _lookingUp = true);
-    final meaning = await DictionaryService.lookupMeaning(word);
+    final result = await DictionaryService.lookup(word);
     if (!mounted) return;
     setState(() {
       _lookingUp = false;
-      if (meaning != null && _meaningCtrl.text.trim().isEmpty) {
-        _meaningCtrl.text = meaning;
+      _nativeAudioUrl = result.audioUrl;
+      if (result.meaning != null && _meaningCtrl.text.trim().isEmpty) {
+        _meaningCtrl.text = result.meaning!;
       }
     });
   }
@@ -149,11 +152,12 @@ class _RecordScreenState extends State<RecordScreen>
       meaning: _meaningCtrl.text.trim(),
       tags: _selectedTags.toList(),
       myVoicePath: _myVoicePath,
+      nativeAudioUrl: _nativeAudioUrl,
     );
     await store.addWord(entry);
 
-    // 저장 직후 오리지널 발음 1회 재생 (에코!)
-    AudioService().speak(word);
+    // 저장 직후 원어민 발음 1회 재생 (에코!)
+    AudioService().pronounce(word, audioUrl: _nativeAudioUrl);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -167,6 +171,7 @@ class _RecordScreenState extends State<RecordScreen>
       _wordCtrl.clear();
       _meaningCtrl.clear();
       _myVoicePath = null;
+      _nativeAudioUrl = null;
       _selectedTags.clear();
       _statusMessage = '녹음 버튼을 누르고 단어를 말하세요';
     });
@@ -339,11 +344,14 @@ class _RecordScreenState extends State<RecordScreen>
                           borderRadius: BorderRadius.circular(12)),
                     ),
                     icon: const Icon(Icons.volume_up, size: 20),
-                    label: const Text('표준 발음',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    label: Text(_nativeAudioUrl != null ? '원어민 발음' : '표준 발음',
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
                     onPressed: () {
                       final w = _wordCtrl.text.trim();
-                      if (w.isNotEmpty) AudioService().speak(w);
+                      if (w.isNotEmpty) {
+                        AudioService()
+                            .pronounce(w, audioUrl: _nativeAudioUrl);
+                      }
                     },
                   ),
                 ),

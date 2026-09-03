@@ -3,27 +3,43 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
-/// 단어 뜻 자동 조회
+/// 사전 조회 결과: 뜻 + 원어민 발음 오디오 URL
+class DictResult {
+  final String? meaning;
+  final String? audioUrl;
+  const DictResult({this.meaning, this.audioUrl});
+}
+
+/// 단어 뜻 + 원어민 발음 자동 조회
 /// 1) MyMemory 번역 API → 한글 뜻 (구문/여러 단어도 지원)
-/// 2) dictionaryapi.dev → 영어 정의 (단일 단어)
-/// 두 결과를 합쳐서 반환
+/// 2) dictionaryapi.dev → 영어 정의 + 실제 원어민 발음 mp3 (단일 단어)
 class DictionaryService {
-  static Future<String?> lookupMeaning(String word) async {
+  static Future<DictResult> lookup(String word) async {
     final w = word.trim();
-    if (w.isEmpty) return null;
+    if (w.isEmpty) return const DictResult();
 
     final results = await Future.wait([
       _lookupKorean(w),
-      _lookupEnglishDef(w),
+      _lookupEnglishData(w),
     ]);
 
-    final korean = results[0];
-    final english = results[1];
+    final korean = results[0] as String?;
+    final english = results[1] as _EnglishData;
 
     final parts = <String>[];
     if (korean != null && korean.isNotEmpty) parts.add(korean);
-    if (english != null && english.isNotEmpty) parts.add(english);
-    return parts.isEmpty ? null : parts.join('\n');
+    if (english.definition != null && english.definition!.isNotEmpty) {
+      parts.add(english.definition!);
+    }
+    return DictResult(
+      meaning: parts.isEmpty ? null : parts.join('\n'),
+      audioUrl: english.audioUrl,
+    );
+  }
+
+  /// 하위 호환용
+  static Future<String?> lookupMeaning(String word) async {
+    return (await lookup(word)).meaning;
   }
 
   /// 한글 번역 (MyMemory 무료 번역 API - 구문도 OK)
@@ -39,7 +55,6 @@ class DictionaryService {
       final translated =
           data['responseData']?['translatedText']?.toString().trim();
       if (translated == null || translated.isEmpty) return null;
-      // 번역 실패 시 원문 그대로 돌아오는 경우 제외
       if (translated.toLowerCase() == word.toLowerCase()) return null;
       return translated;
     } catch (e) {
@@ -48,43 +63,71 @@ class DictionaryService {
     }
   }
 
-  /// 영어 정의 (dictionaryapi.dev - 단일 단어 위주)
-  static Future<String?> _lookupEnglishDef(String word) async {
+  /// 영어 정의 + 원어민 발음 오디오 (dictionaryapi.dev)
+  static Future<_EnglishData> _lookupEnglishData(String word) async {
     try {
       final w = word.toLowerCase();
       final uri =
           Uri.https('api.dictionaryapi.dev', '/api/v2/entries/en/$w');
       var res = await http.get(uri).timeout(const Duration(seconds: 6));
 
-      // 구문(여러 단어)이 실패하면 하이픈 연결로 재시도 (예: high school → high-school)
+      // 구문(여러 단어)이 실패하면 하이픈 연결로 재시도
       if (res.statusCode != 200 && w.contains(' ')) {
         final hyphen = w.replaceAll(RegExp(r'\s+'), '-');
         final uri2 =
             Uri.https('api.dictionaryapi.dev', '/api/v2/entries/en/$hyphen');
         res = await http.get(uri2).timeout(const Duration(seconds: 6));
       }
-      if (res.statusCode != 200) return null;
+      if (res.statusCode != 200) return const _EnglishData();
 
       final data = jsonDecode(res.body);
-      if (data is! List || data.isEmpty) return null;
-      final meanings = data[0]['meanings'];
-      if (meanings is! List || meanings.isEmpty) return null;
+      if (data is! List || data.isEmpty) return const _EnglishData();
 
-      final parts = <String>[];
-      for (final m in meanings.take(2)) {
-        final pos = m['partOfSpeech']?.toString() ?? '';
-        final defs = m['definitions'];
-        if (defs is List && defs.isNotEmpty) {
-          final def = defs[0]['definition']?.toString() ?? '';
-          if (def.isNotEmpty) {
-            parts.add(pos.isNotEmpty ? '($pos) $def' : def);
+      // ─── 원어민 발음 오디오 URL 추출 (미국 발음 우선) ───
+      String? audioUrl;
+      for (final entry in data) {
+        final phonetics = entry['phonetics'];
+        if (phonetics is! List) continue;
+        for (final p in phonetics) {
+          final audio = p['audio']?.toString() ?? '';
+          if (audio.isEmpty) continue;
+          if (audio.contains('-us.')) {
+            audioUrl = audio;
+            break;
+          }
+          audioUrl ??= audio;
+        }
+        if (audioUrl != null && audioUrl.contains('-us.')) break;
+      }
+
+      // ─── 영어 정의 추출 ───
+      String? definition;
+      final meanings = data[0]['meanings'];
+      if (meanings is List && meanings.isNotEmpty) {
+        final parts = <String>[];
+        for (final m in meanings.take(2)) {
+          final pos = m['partOfSpeech']?.toString() ?? '';
+          final defs = m['definitions'];
+          if (defs is List && defs.isNotEmpty) {
+            final def = defs[0]['definition']?.toString() ?? '';
+            if (def.isNotEmpty) {
+              parts.add(pos.isNotEmpty ? '($pos) $def' : def);
+            }
           }
         }
+        if (parts.isNotEmpty) definition = parts.join('\n');
       }
-      return parts.isEmpty ? null : parts.join('\n');
+
+      return _EnglishData(definition: definition, audioUrl: audioUrl);
     } catch (e) {
       if (kDebugMode) debugPrint('Dictionary lookup error: $e');
-      return null;
+      return const _EnglishData();
     }
   }
+}
+
+class _EnglishData {
+  final String? definition;
+  final String? audioUrl;
+  const _EnglishData({this.definition, this.audioUrl});
 }

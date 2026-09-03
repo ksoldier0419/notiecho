@@ -61,12 +61,12 @@ class _PlayScreenState extends State<PlayScreen> {
       if (_voiceMode == 'mine' && w.myVoicePath != null) {
         await audio.playMyVoice(w.myVoicePath!);
       } else if (_voiceMode == 'both' && w.myVoicePath != null) {
-        await audio.speak(w.word);
+        await audio.pronounce(w.word, audioUrl: w.nativeAudioUrl);
         if (_stopRequested) return;
         await Future.delayed(const Duration(milliseconds: 400));
         await audio.playMyVoice(w.myVoicePath!);
       } else {
-        await audio.speak(w.word);
+        await audio.pronounce(w.word, audioUrl: w.nativeAudioUrl);
       }
       if (i < _repeatPerWord - 1 && !_stopRequested) {
         await Future.delayed(Duration(milliseconds: (_gapSeconds * 500).round()));

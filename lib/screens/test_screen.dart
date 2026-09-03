@@ -46,7 +46,7 @@ class _TestScreenState extends State<TestScreen> {
     if (_mode == 'listen') {
       Future.delayed(const Duration(milliseconds: 400), () {
         if (mounted && _queue.isNotEmpty) {
-          AudioService().speak(_queue[0].word);
+          AudioService().pronounce(_queue[0].word, audioUrl: _queue[0].nativeAudioUrl);
         }
       });
     }
@@ -88,7 +88,7 @@ class _TestScreenState extends State<TestScreen> {
         _revealed = false;
       });
       if (_mode == 'listen') {
-        AudioService().speak(_queue[_currentIndex].word);
+        AudioService().pronounce(_queue[_currentIndex].word, audioUrl: _queue[_currentIndex].nativeAudioUrl);
       }
     }
   }
@@ -316,11 +316,11 @@ class _TestScreenState extends State<TestScreen> {
                         iconSize: 72,
                         icon: const Icon(Icons.volume_up_rounded,
                             color: AppTheme.deepIndigo),
-                        onPressed: () => AudioService().speak(w.word),
+                        onPressed: () => AudioService().pronounce(w.word, audioUrl: w.nativeAudioUrl),
                       ),
                       const SizedBox(height: 8),
                       TextButton.icon(
-                        onPressed: () => AudioService().speak(w.word),
+                        onPressed: () => AudioService().pronounce(w.word, audioUrl: w.nativeAudioUrl),
                         icon: const Icon(Icons.replay, size: 16),
                         label: const Text('다시 듣기'),
                       ),
@@ -357,7 +357,7 @@ class _TestScreenState extends State<TestScreen> {
                                     icon: const Icon(Icons.volume_up,
                                         color: AppTheme.teal),
                                     onPressed: () =>
-                                        AudioService().speak(w.word),
+                                        AudioService().pronounce(w.word, audioUrl: w.nativeAudioUrl),
                                   ),
                                 if (_mode == 'listen' && w.meaning.isNotEmpty)
                                   Padding(

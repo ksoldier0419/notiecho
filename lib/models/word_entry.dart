@@ -6,6 +6,7 @@ class WordEntry {
   List<String> tags;
   final DateTime createdAt;
   String? myVoicePath; // 내 목소리 녹음 파일 경로 (or blob url on web)
+  String? nativeAudioUrl; // 원어민 발음 mp3 URL (사전 API)
   String stage; // 'short' (단기기억) | 'long' (장기기억)
   int correctStreak; // 연속 정답 횟수
   int playCount; // 재생 횟수
@@ -19,6 +20,7 @@ class WordEntry {
     List<String>? tags,
     DateTime? createdAt,
     this.myVoicePath,
+    this.nativeAudioUrl,
     this.stage = 'short',
     this.correctStreak = 0,
     this.playCount = 0,
@@ -36,6 +38,7 @@ class WordEntry {
         'tags': tags,
         'createdAt': createdAt.toIso8601String(),
         'myVoicePath': myVoicePath,
+        'nativeAudioUrl': nativeAudioUrl,
         'stage': stage,
         'correctStreak': correctStreak,
         'playCount': playCount,
@@ -50,6 +53,7 @@ class WordEntry {
         tags: (map['tags'] as List?)?.map((e) => e.toString()).toList() ?? [],
         createdAt: DateTime.tryParse((map['createdAt'] as String?) ?? '') ?? DateTime.now(),
         myVoicePath: map['myVoicePath'] as String?,
+        nativeAudioUrl: map['nativeAudioUrl'] as String?,
         stage: (map['stage'] as String?) ?? 'short',
         correctStreak: (map['correctStreak'] as num?)?.toInt() ?? 0,
         playCount: (map['playCount'] as num?)?.toInt() ?? 0,

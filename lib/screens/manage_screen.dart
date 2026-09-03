@@ -204,7 +204,7 @@ class _ManageScreenState extends State<ManageScreen> {
       ),
       leading: IconButton(
         icon: const Icon(Icons.volume_up, color: AppTheme.teal, size: 20),
-        onPressed: () => AudioService().speak(w.word),
+        onPressed: () => AudioService().pronounce(w.word, audioUrl: w.nativeAudioUrl),
       ),
       trailing: PopupMenuButton<String>(
         icon: const Icon(Icons.more_vert, size: 20),
