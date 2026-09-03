@@ -107,7 +107,15 @@ class AudioService {
   }
 
   /// 구글 번역 TTS mp3 URL 생성
+  /// 웹: 같은 서버의 프록시 경유 (브라우저 Referer로 인한 구글 차단 우회)
+  /// 모바일: 구글 직접 호출 (네이티브 요청은 Referer가 없어 정상 동작)
   String _googleTtsUrl(String text) {
+    if (kIsWeb) {
+      // 현재 페이지 origin 기준 절대 URL (프리뷰/배포 어디서든 동작)
+      return Uri.base
+          .resolveUri(Uri(path: '/tts', queryParameters: {'q': text}))
+          .toString();
+    }
     return Uri.https('translate.google.com', '/translate_tts', {
       'ie': 'UTF-8',
       'tl': 'en',
