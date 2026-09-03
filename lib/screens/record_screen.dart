@@ -14,7 +14,7 @@ import '../services/dictionary_service.dart';
 import '../theme.dart';
 import '../widgets/tag_selector.dart';
 
-/// 녹음 탭: 녹음 → STT 인식 → 정정 → 발음 확인 → 태그 → 저장
+/// 녹음 탭: STT 인식 → 정정 → 내 발음 별도 녹음 → 태그 → 저장
 class RecordScreen extends StatefulWidget {
   const RecordScreen({super.key});
 
@@ -32,14 +32,15 @@ class _RecordScreenState extends State<RecordScreen>
   late AnimationController _pulseCtrl;
 
   bool _sttAvailable = false;
-  bool _isListening = false;
+  bool _isListening = false;      // STT 듣는 중
+  bool _isRecordingVoice = false; // 내 발음 녹음 중
   bool _hasResult = false;
   bool _lookingUp = false;
   bool _permissionDenied = false;
   String? _myVoicePath;
   String? _nativeAudioUrl;
   final Set<String> _selectedTags = {};
-  String _statusMessage = '녹음 버튼을 누르고 단어를 말하세요';
+  String _statusMessage = '버튼을 누르고 단어를 말하세요';
 
   @override
   void initState() {
@@ -50,20 +51,16 @@ class _RecordScreenState extends State<RecordScreen>
     _requestPermissionAndInit();
   }
 
-  /// 마이크 권한 요청 → 권한 허용 시 STT 초기화
+  // ─── 권한 요청 ───────────────────────────────────────────────
   Future<void> _requestPermissionAndInit() async {
-    // 웹은 브라우저가 권한을 처리하므로 바로 초기화
     if (kIsWeb) {
       await _initSpeech();
       return;
     }
-
     final status = await Permission.microphone.status;
-
     if (status.isGranted) {
       await _initSpeech();
     } else if (status.isPermanentlyDenied) {
-      // 설정 앱에서만 허용 가능한 상태
       if (mounted) {
         setState(() {
           _permissionDenied = true;
@@ -71,23 +68,16 @@ class _RecordScreenState extends State<RecordScreen>
         });
       }
     } else {
-      // 권한 요청 팝업 표시
       final result = await Permission.microphone.request();
       if (result.isGranted) {
         await _initSpeech();
-      } else if (result.isPermanentlyDenied) {
-        if (mounted) {
-          setState(() {
-            _permissionDenied = true;
-            _statusMessage = '마이크 권한이 차단되었습니다. 설정에서 허용해 주세요.';
-          });
-        }
       } else {
-        // 거부됨 (팝업에서 취소)
         if (mounted) {
           setState(() {
             _permissionDenied = true;
-            _statusMessage = '마이크 권한이 필요합니다. 버튼을 눌러 다시 허용해 주세요.';
+            _statusMessage = result.isPermanentlyDenied
+                ? '마이크 권한이 차단됩니다. 설정에서 허용해 주세요.'
+                : '마이크 권한이 필요합니다. 아래 버튼으로 허용해 주세요.';
           });
         }
       }
@@ -95,13 +85,15 @@ class _RecordScreenState extends State<RecordScreen>
     if (mounted) setState(() {});
   }
 
+  // ─── STT 초기화 ──────────────────────────────────────────────
   Future<void> _initSpeech() async {
     try {
       _sttAvailable = await _speech.initialize(
         onStatus: (status) {
           if (kDebugMode) debugPrint('[STT] status: $status');
-          if (status == 'notListening' || status == 'done') {
-            if (mounted && _isListening) _stopListening();
+          if ((status == 'notListening' || status == 'done') &&
+              mounted && _isListening) {
+            _stopStt();
           }
         },
         onError: (e) {
@@ -109,13 +101,10 @@ class _RecordScreenState extends State<RecordScreen>
           if (mounted) {
             setState(() {
               _isListening = false;
-              // 권한 오류일 경우 구체적인 안내
-              if (e.errorMsg.contains('permission') ||
-                  e.errorMsg.contains('audio')) {
-                _statusMessage = '마이크 권한을 허용해 주세요 (설정 > 앱 > 마이크)';
-              } else {
-                _statusMessage = '음성 인식 오류 — 다시 시도하거나 직접 입력하세요';
-              }
+              _statusMessage = e.errorMsg.contains('permission') ||
+                      e.errorMsg.contains('audio')
+                  ? '마이크 권한을 허용해 주세요 (설정 > 앱 > 마이크)'
+                  : '음성 인식 오류 — 다시 시도하거나 직접 입력하세요';
             });
           }
         },
@@ -128,15 +117,14 @@ class _RecordScreenState extends State<RecordScreen>
     if (mounted) setState(() {});
   }
 
-  Future<void> _startListening() async {
-    // 권한이 거부된 상태라면 재요청 또는 설정으로 안내
+  // ─── STT 시작 (단어 인식 전용, 녹음과 분리) ──────────────────
+  Future<void> _startStt() async {
     if (!kIsWeb && _permissionDenied) {
       final status = await Permission.microphone.status;
       if (status.isPermanentlyDenied) {
         _showGoToSettingsDialog();
         return;
       }
-      // 다시 한번 요청 시도
       await _requestPermissionAndInit();
       if (!_sttAvailable) return;
     }
@@ -153,9 +141,6 @@ class _RecordScreenState extends State<RecordScreen>
       _permissionDenied = false;
     });
 
-    // 내 목소리 녹음 시작 (STT와 동시)
-    await _recorder.start();
-
     if (_sttAvailable) {
       await _speech.listen(
         listenOptions: stt.SpeechListenOptions(
@@ -169,52 +154,22 @@ class _RecordScreenState extends State<RecordScreen>
           }
         },
       );
-    } else {
-      // STT 불가 시에도 내 목소리 녹음은 계속 (직접 입력 가능)
-      if (kDebugMode) debugPrint('[STT] not available, recording voice only');
     }
   }
 
-  void _showGoToSettingsDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('마이크 권한 필요'),
-        content: const Text(
-          '음성 인식을 사용하려면 마이크 권한이 필요합니다.\n\n'
-          '설정 앱 > NotiEcho > 권한 > 마이크를 "허용"으로 변경해 주세요.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              openAppSettings(); // permission_handler 제공
-            },
-            child: const Text('설정 열기'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _stopListening() async {
+  // ─── STT 중단 ─────────────────────────────────────────────────
+  Future<void> _stopStt() async {
     try {
       await _speech.stop();
     } catch (_) {}
-    final voicePath = await _recorder.stop();
 
     if (!mounted) return;
     setState(() {
       _isListening = false;
-      _myVoicePath = voicePath;
       _hasResult = true;
       _statusMessage = _wordCtrl.text.trim().isEmpty
           ? '인식된 단어가 없어요 — 직접 입력해도 됩니다'
-          : '인식 결과를 확인하고 정정하세요 ✏️';
+          : '인식 결과를 확인하고 내 발음을 녹음하세요 🎤';
     });
 
     if (_wordCtrl.text.trim().isNotEmpty) {
@@ -222,6 +177,47 @@ class _RecordScreenState extends State<RecordScreen>
     }
   }
 
+  // ─── 내 발음 녹음 시작 ────────────────────────────────────────
+  Future<void> _startMyVoiceRecording() async {
+    // STT가 켜져 있으면 먼저 중단
+    if (_isListening) {
+      try { await _speech.stop(); } catch (_) {}
+      setState(() => _isListening = false);
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+
+    setState(() {
+      _isRecordingVoice = true;
+      _myVoicePath = null;
+      _statusMessage = '내 발음 녹음 중... 🔴 단어를 크게 말해보세요';
+    });
+
+    final started = await _recorder.start();
+    if (!started) {
+      if (mounted) {
+        setState(() {
+          _isRecordingVoice = false;
+          _statusMessage = '녹음 시작 실패 — 마이크 권한을 확인해 주세요';
+        });
+      }
+    }
+  }
+
+  // ─── 내 발음 녹음 중단 ────────────────────────────────────────
+  Future<void> _stopMyVoiceRecording() async {
+    final path = await _recorder.stop();
+    if (!mounted) return;
+    setState(() {
+      _isRecordingVoice = false;
+      _myVoicePath = path;
+      _statusMessage = path != null
+          ? '녹음 완료! ▶ 버튼으로 들어보세요 ✅'
+          : '녹음 실패 — 다시 시도해 주세요';
+    });
+    if (kDebugMode) debugPrint('[MyVoice] saved to: $path');
+  }
+
+  // ─── 뜻 조회 ─────────────────────────────────────────────────
   Future<void> _lookupMeaning() async {
     final word = _wordCtrl.text.trim();
     if (word.isEmpty) return;
@@ -237,6 +233,7 @@ class _RecordScreenState extends State<RecordScreen>
     });
   }
 
+  // ─── 저장 ─────────────────────────────────────────────────────
   Future<void> _save() async {
     final word = _wordCtrl.text.trim();
     if (word.isEmpty) {
@@ -256,7 +253,6 @@ class _RecordScreenState extends State<RecordScreen>
     );
     await store.addWord(entry);
 
-    // 저장 직후 원어민 발음 1회 재생 (에코!)
     AudioService().pronounce(word, audioUrl: _nativeAudioUrl);
 
     if (!mounted) return;
@@ -273,8 +269,34 @@ class _RecordScreenState extends State<RecordScreen>
       _myVoicePath = null;
       _nativeAudioUrl = null;
       _selectedTags.clear();
-      _statusMessage = '녹음 버튼을 누르고 단어를 말하세요';
+      _statusMessage = '버튼을 누르고 단어를 말하세요';
     });
+  }
+
+  void _showGoToSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('마이크 권한 필요'),
+        content: const Text(
+          '음성 인식을 사용하려면 마이크 권한이 필요합니다.\n\n'
+          '설정 앱 → NotiEcho → 권한 → 마이크 → "허용"으로 변경해 주세요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              openAppSettings();
+            },
+            child: const Text('설정 열기'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -286,17 +308,18 @@ class _RecordScreenState extends State<RecordScreen>
     super.dispose();
   }
 
+  // ─── UI ───────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final store = context.watch<WordStore>();
     return Scaffold(
       appBar: AppBar(
-        title: Row(
+        title: const Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.graphic_eq, size: 22),
-            const SizedBox(width: 8),
-            const Text('NotiEcho',
+            Icon(Icons.graphic_eq, size: 22),
+            SizedBox(width: 8),
+            Text('NotiEcho',
                 style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
           ],
         ),
@@ -311,7 +334,7 @@ class _RecordScreenState extends State<RecordScreen>
               style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
             ),
             const SizedBox(height: 24),
-            _buildRecordButton(),
+            _buildSttButton(),
             const SizedBox(height: 16),
             Text(
               _statusMessage,
@@ -350,9 +373,10 @@ class _RecordScreenState extends State<RecordScreen>
     );
   }
 
-  Widget _buildRecordButton() {
+  // ─── STT 버튼 ─────────────────────────────────────────────────
+  Widget _buildSttButton() {
     return GestureDetector(
-      onTap: _isListening ? _stopListening : _startListening,
+      onTap: _isListening ? _stopStt : _startStt,
       child: SizedBox(
         width: 200,
         height: 200,
@@ -362,7 +386,6 @@ class _RecordScreenState extends State<RecordScreen>
             return Stack(
               alignment: Alignment.center,
               children: [
-                // 에코 링 애니메이션
                 if (_isListening) ...[
                   _echoRing(_pulseCtrl.value),
                   _echoRing((_pulseCtrl.value + 0.5) % 1.0),
@@ -376,7 +399,6 @@ class _RecordScreenState extends State<RecordScreen>
                           color: AppTheme.teal.withValues(alpha: 0.25), width: 2),
                     ),
                   ),
-                // 메인 버튼
                 Container(
                   width: 130,
                   height: 130,
@@ -399,7 +421,7 @@ class _RecordScreenState extends State<RecordScreen>
                     ],
                   ),
                   child: Icon(
-                    _isListening ? Icons.stop_rounded : Icons.mic_rounded,
+                    _isListening ? Icons.stop_rounded : Icons.record_voice_over_rounded,
                     color: Colors.white,
                     size: 56,
                   ),
@@ -427,6 +449,7 @@ class _RecordScreenState extends State<RecordScreen>
     );
   }
 
+  // ─── 결과 카드 ────────────────────────────────────────────────
   Widget _buildResultCard(WordStore store) {
     return Card(
       child: Padding(
@@ -434,6 +457,7 @@ class _RecordScreenState extends State<RecordScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 단어 입력
             const Row(
               children: [
                 Icon(Icons.edit_note, color: AppTheme.teal, size: 20),
@@ -448,70 +472,49 @@ class _RecordScreenState extends State<RecordScreen>
               style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               decoration: InputDecoration(
                 hintText: '단어 입력...',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onSubmitted: (_) => _lookupMeaning(),
             ),
-            const SizedBox(height: 10),
-            // 발음 듣기 버튼 영역
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.deepIndigo,
-                      side: const BorderSide(color: AppTheme.teal),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                    icon: const Icon(Icons.volume_up, size: 20),
-                    label: Text(_nativeAudioUrl != null ? '원어민 발음' : '표준 발음',
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: () {
-                      final w = _wordCtrl.text.trim();
-                      if (w.isNotEmpty) {
-                        AudioService()
-                            .pronounce(w, audioUrl: _nativeAudioUrl);
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: _myVoicePath != null
-                          ? AppTheme.indigo
-                          : Colors.grey,
-                      side: BorderSide(
-                          color: _myVoicePath != null
-                              ? AppTheme.indigo
-                              : Colors.grey.shade300),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                    icon: const Icon(Icons.record_voice_over, size: 20),
-                    label: const Text('내 녹음',
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: _myVoicePath == null
-                        ? null
-                        : () => AudioService().playMyVoice(_myVoicePath!),
-                  ),
-                ),
-              ],
-            ),
             const SizedBox(height: 12),
+
+            // 원어민 발음 버튼
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.deepIndigo,
+                  side: const BorderSide(color: AppTheme.teal),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.volume_up, size: 20),
+                label: Text(
+                  _nativeAudioUrl != null ? '원어민 발음 듣기' : '표준 발음 듣기',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                onPressed: () {
+                  final w = _wordCtrl.text.trim();
+                  if (w.isNotEmpty) {
+                    AudioService().pronounce(w, audioUrl: _nativeAudioUrl);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // 내 발음 녹음 버튼 (STT와 완전히 분리)
+            _buildMyVoiceSection(),
+            const SizedBox(height: 12),
+
+            // 뜻
             Row(
               children: [
                 const Text('뜻', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(width: 8),
                 if (_lookingUp)
                   const SizedBox(
-                      width: 14,
-                      height: 14,
+                      width: 14, height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2)),
                 const Spacer(),
                 TextButton.icon(
@@ -527,28 +530,30 @@ class _RecordScreenState extends State<RecordScreen>
               minLines: 1,
               decoration: InputDecoration(
                 hintText: '뜻 입력 (자동 조회 또는 직접 입력)',
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
             const SizedBox(height: 16),
+
+            // 태그
             const Text('태그 선택',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             const SizedBox(height: 8),
             TagSelector(
               allTags: store.tags,
               selected: _selectedTags,
-              onChanged: (tags) =>
-                  setState(() => _selectedTags
-                    ..clear()
-                    ..addAll(tags)),
+              onChanged: (tags) => setState(() => _selectedTags
+                ..clear()
+                ..addAll(tags)),
               onCreateTag: (t) => store.addTag(t),
             ),
             const SizedBox(height: 16),
+
+            // 저장 버튼
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: _isListening ? null : _save,
+                onPressed: (_isListening || _isRecordingVoice) ? null : _save,
                 icon: const Icon(Icons.save_alt),
                 label: const Text('발음과 함께 저장',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -556,6 +561,86 @@ class _RecordScreenState extends State<RecordScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ─── 내 발음 녹음 섹션 ────────────────────────────────────────
+  Widget _buildMyVoiceSection() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _isRecordingVoice
+            ? Colors.red.shade50
+            : _myVoicePath != null
+                ? AppTheme.lightTeal.withValues(alpha: 0.2)
+                : Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isRecordingVoice
+              ? Colors.red.shade300
+              : _myVoicePath != null
+                  ? AppTheme.teal.withValues(alpha: 0.5)
+                  : Colors.grey.shade300,
+        ),
+      ),
+      child: Row(
+        children: [
+          // 녹음 시작/중지 버튼
+          GestureDetector(
+            onTap: _isRecordingVoice ? _stopMyVoiceRecording : _startMyVoiceRecording,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _isRecordingVoice ? Colors.red : AppTheme.indigo,
+              ),
+              child: Icon(
+                _isRecordingVoice ? Icons.stop : Icons.mic,
+                color: Colors.white,
+                size: 26,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isRecordingVoice
+                      ? '🔴 녹음 중... 단어를 크게 말하세요'
+                      : _myVoicePath != null
+                          ? '✅ 내 발음 녹음 완료'
+                          : '내 발음 녹음하기',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: _isRecordingVoice ? Colors.red.shade700 : null,
+                  ),
+                ),
+                Text(
+                  _isRecordingVoice
+                      ? '버튼을 다시 눌러 중지'
+                      : _myVoicePath != null
+                          ? '▶ 버튼으로 내 녹음을 들을 수 있어요'
+                          : '원어민 발음을 듣고 따라 말해보세요',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+          // 내 녹음 재생 버튼
+          if (_myVoicePath != null && !_isRecordingVoice)
+            IconButton(
+              icon: const Icon(Icons.play_circle_filled, size: 32),
+              color: AppTheme.indigo,
+              tooltip: '내 녹음 듣기',
+              onPressed: () => AudioService().playMyVoice(_myVoicePath!),
+            ),
+        ],
       ),
     );
   }
@@ -585,7 +670,8 @@ class _RecordScreenState extends State<RecordScreen>
                 SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    '논문을 읽다가 모르는 단어가 나오면 바로 녹음하세요.\n입 밖으로 소리 내어 따라 말할수록 기억에 오래 남습니다!',
+                    '① 버튼 눌러 단어 인식 → ② 원어민 발음 듣기 → ③ 내 발음 녹음 → ④ 저장\n'
+                    '입 밖으로 소리 내어 말할수록 기억에 오래 남습니다!',
                     style: TextStyle(fontSize: 13, height: 1.5),
                   ),
                 ),
