@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 class DictMeaning {
   final String partOfSpeech; // noun, verb, adjective ...
   final String definition;   // 영어 정의
-  final String? korean;      // 한국어 번역 (품사+정의 기준)
+  final String? korean;      // 한국어 번역
   final String? example;     // 예문
 
   const DictMeaning({
@@ -17,7 +17,6 @@ class DictMeaning {
     this.example,
   });
 
-  /// 화면 표시용 레이블: "(noun) 인사" 형태
   String get label {
     final pos = partOfSpeech.isNotEmpty ? '($partOfSpeech) ' : '';
     return '$pos${korean ?? definition}';
@@ -26,9 +25,9 @@ class DictMeaning {
 
 /// 사전 조회 전체 결과
 class DictResult {
-  final String? meaning;          // 최종 선택된 뜻 (저장용)
-  final String? audioUrl;         // 원어민 발음 mp3
-  final List<DictMeaning> allMeanings; // 선택 가능한 전체 뜻 목록
+  final String? meaning;
+  final String? audioUrl;
+  final List<DictMeaning> allMeanings;
 
   const DictResult({
     this.meaning,
@@ -37,56 +36,58 @@ class DictResult {
   });
 }
 
-/// 단어 뜻 + 원어민 발음 자동 조회
-/// 1) dictionaryapi.dev → 품사별 영어 정의 전체 목록 + 발음 mp3
-/// 2) MyMemory 번역 API → 한글 번역 (단, 품질 필터링 강화)
 class DictionaryService {
 
   static Future<DictResult> lookup(String word) async {
     final w = word.trim();
     if (w.isEmpty) return const DictResult();
 
-    // 영어 사전 데이터 먼저 가져오기 (더 신뢰도 높음)
-    final engData = await _lookupEnglishData(w);
+    // 병렬 조회: 영어 사전 + 구글 번역
+    final results = await Future.wait([
+      _lookupEnglishData(w),
+      _translateGoogle(w),
+    ]);
 
-    // 한국어 번역: 단어가 한 단어(공백 없음)이고 영어 단어일 때만 요청
-    // MyMemory는 문맥(문장)이 들어오면 엉뚱한 결과를 낼 수 있어서 필터링
-    String? koreanTranslation;
-    if (_isSingleWord(w)) {
-      koreanTranslation = await _lookupKorean(w);
-    }
+    final engData = results[0] as _EnglishData;
+    final koreanMap = results[1] as Map<String, String>; // pos → 한국어
 
     // 품사별 뜻 목록 구성
     final List<DictMeaning> allMeanings = [];
 
     if (engData.meanings.isNotEmpty) {
       for (final m in engData.meanings) {
+        // 품사에 매칭되는 한국어 우선, 없으면 단어 전체 번역 사용
+        final korean = koreanMap[m.partOfSpeech] ?? koreanMap['word'];
         allMeanings.add(DictMeaning(
           partOfSpeech: m.partOfSpeech,
           definition: m.definition,
-          korean: m == engData.meanings.first ? koreanTranslation : null,
+          korean: korean,
           example: m.example,
         ));
       }
-    } else if (koreanTranslation != null) {
-      // 사전에 없는 단어지만 번역은 됐을 때
-      allMeanings.add(DictMeaning(
-        partOfSpeech: '',
-        definition: w,
-        korean: koreanTranslation,
-      ));
+    } else {
+      // 사전에 없는 단어: 번역만 있는 경우
+      final korean = koreanMap['word'];
+      if (korean != null) {
+        allMeanings.add(DictMeaning(
+          partOfSpeech: '',
+          definition: w,
+          korean: korean,
+        ));
+      }
     }
 
-    // 기본 선택값: 첫 번째 뜻을 한국어 + 영어 정의로 조합
+    // 기본 저장값: 한국어 + 첫번째 영어 정의
     String? defaultMeaning;
     if (allMeanings.isNotEmpty) {
       final first = allMeanings.first;
       final parts = <String>[];
-      if (koreanTranslation != null && koreanTranslation.isNotEmpty) {
-        parts.add(koreanTranslation);
+      if (first.korean != null && first.korean!.isNotEmpty) {
+        parts.add(first.korean!);
       }
-      if (first.definition.isNotEmpty) {
-        parts.add('(${first.partOfSpeech.isNotEmpty ? first.partOfSpeech : "def"}) ${first.definition}');
+      if (first.definition.isNotEmpty && first.definition != w) {
+        final pos = first.partOfSpeech.isNotEmpty ? first.partOfSpeech : 'def';
+        parts.add('($pos) ${first.definition}');
       }
       defaultMeaning = parts.isNotEmpty ? parts.join('\n') : null;
     }
@@ -98,49 +99,114 @@ class DictionaryService {
     );
   }
 
-  /// 단일 단어 여부 체크 (공백, 하이픈 허용, 숫자 제외)
-  static bool _isSingleWord(String w) {
-    // 공백이 2개 이상이면 구문으로 판단
-    final spaceCount = w.split(' ').length - 1;
-    if (spaceCount >= 2) return false;
-    // 숫자만 있거나 특수문자 위주면 제외
-    if (RegExp(r'^\d+$').hasMatch(w)) return false;
-    return true;
+  /// Google Translate 무료 엔드포인트 (MyMemory 대체)
+  /// 품사별 번역 + 단어 전체 번역 모두 반환
+  /// 반환값: {'word': '안녕', 'noun': '인사', 'verb': '안녕하다', ...}
+  static Future<Map<String, String>> _translateGoogle(String word) async {
+    final Map<String, String> result = {};
+    try {
+      // ── 방법 1: Google Translate API v2 (무료, 단어 기본 번역) ──
+      // dt=bd: 사전(품사별 번역), dt=t: 번역 텍스트
+      // Uri.https는 queryParameters Map이므로 dt를 List로 처리해야 함
+      final uri = Uri(
+        scheme: 'https',
+        host: 'translate.googleapis.com',
+        path: '/translate_a/single',
+        query: 'client=gtx&sl=en&tl=ko&dt=t&dt=bd&q=${Uri.encodeComponent(word)}',
+      );
+      final res = await http.get(uri,
+        headers: {'User-Agent': 'Mozilla/5.0'},
+      ).timeout(const Duration(seconds: 6));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+
+        // 기본 번역 (data[0][0][0])
+        if (data is List && data.isNotEmpty) {
+          final mainTranslation = data[0];
+          if (mainTranslation is List && mainTranslation.isNotEmpty) {
+            final firstPart = mainTranslation[0];
+            if (firstPart is List && firstPart.isNotEmpty) {
+              final translated = firstPart[0]?.toString().trim();
+              if (translated != null &&
+                  translated.isNotEmpty &&
+                  translated.toLowerCase() != word.toLowerCase()) {
+                result['word'] = translated;
+              }
+            }
+          }
+
+          // 품사별 번역 (data[1]: [[품사, [번역들...]], ...])
+          if (data.length > 1 && data[1] is List) {
+            for (final posGroup in data[1]) {
+              if (posGroup is! List || posGroup.length < 2) continue;
+              final pos = posGroup[0]?.toString() ?? '';
+              final translations = posGroup[1];
+              if (translations is List && translations.isNotEmpty) {
+                final firstTr = translations[0]?.toString().trim();
+                if (firstTr != null && firstTr.isNotEmpty) {
+                  // 영어 품사명을 dictionaryapi.dev 형식에 맞게 정규화
+                  final normalizedPos = _normalizePosKo(pos);
+                  if (normalizedPos.isNotEmpty) {
+                    result[normalizedPos] = firstTr;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Dict] Google translate error: $e');
+    }
+
+    // 결과가 없으면 폴백: dt=t 만 사용하는 단순 번역
+    if (result.isEmpty) {
+      try {
+        final uri2 = Uri.https('translate.googleapis.com', '/translate_a/single', {
+          'client': 'gtx',
+          'sl': 'en',
+          'tl': 'ko',
+          'dt': 't',
+          'q': word,
+        });
+        final res2 = await http.get(uri2,
+          headers: {'User-Agent': 'Mozilla/5.0'},
+        ).timeout(const Duration(seconds: 5));
+        if (res2.statusCode == 200) {
+          final data2 = jsonDecode(res2.body);
+          if (data2 is List && data2.isNotEmpty &&
+              data2[0] is List && (data2[0] as List).isNotEmpty) {
+            final segment = (data2[0] as List)[0];
+            if (segment is List && segment.isNotEmpty) {
+              final tr = segment[0]?.toString().trim();
+              if (tr != null && tr.isNotEmpty &&
+                  tr.toLowerCase() != word.toLowerCase()) {
+                result['word'] = tr;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('[Dict] Google translate fallback error: $e');
+      }
+    }
+
+    return result;
   }
 
-  /// 한글 번역 (MyMemory API) — 품질 필터링 강화
-  static Future<String?> _lookupKorean(String word) async {
-    try {
-      final uri = Uri.https('api.mymemory.translated.net', '/get', {
-        'q': word,
-        'langpair': 'en|ko',
-      });
-      final res = await http.get(uri).timeout(const Duration(seconds: 6));
-      if (res.statusCode != 200) return null;
-
-      final data = jsonDecode(res.body);
-      final translated = data['responseData']?['translatedText']?.toString().trim();
-      if (translated == null || translated.isEmpty) return null;
-
-      // 품질 필터: 원문과 동일하면 번역 실패
-      if (translated.toLowerCase() == word.toLowerCase()) return null;
-
-      // 품질 필터: 번역 결과가 영어 단어보다 훨씬 길면 (문장이 들어온 경우)
-      // 예) "hello" → "제 이름은 Azlan입니다" 같은 경우 차단
-      // 원래 단어 길이의 4배 이상이면 엉뚱한 결과로 판단
-      if (translated.length > word.length * 4 + 10) return null;
-
-      // 품질 점수 확인 (0.0 ~ 1.0, 낮으면 신뢰도 낮음)
-      final matchScore = (data['responseData']?['match'] as num?)?.toDouble() ?? 0.0;
-      if (matchScore < 0.05) return null; // 거의 매칭 안 되는 경우 제외
-
-      // 알림 메시지가 포함된 경우 제외 (MyMemory 무료 한도 초과 메시지 등)
-      if (translated.contains('PLEASE') || translated.contains('LIMIT')) return null;
-
-      return translated;
-    } catch (e) {
-      if (kDebugMode) debugPrint('Korean translation error: $e');
-      return null;
+  /// 구글 반환 품사명 → dictionaryapi.dev 품사명 정규화
+  static String _normalizePosKo(String pos) {
+    switch (pos.toLowerCase()) {
+      case 'noun':        return 'noun';
+      case 'verb':        return 'verb';
+      case 'adjective':   return 'adjective';
+      case 'adverb':      return 'adverb';
+      case 'exclamation': return 'exclamation';
+      case 'preposition': return 'preposition';
+      case 'conjunction': return 'conjunction';
+      case 'pronoun':     return 'pronoun';
+      default:            return pos.isNotEmpty ? pos : '';
     }
   }
 
@@ -161,7 +227,7 @@ class DictionaryService {
       final data = jsonDecode(res.body);
       if (data is! List || data.isEmpty) return const _EnglishData();
 
-      // ─── 원어민 발음 오디오 URL (미국 발음 우선) ───
+      // 원어민 발음 오디오 URL (미국 발음 우선)
       String? audioUrl;
       for (final entry in data) {
         final phonetics = entry['phonetics'];
@@ -175,7 +241,7 @@ class DictionaryService {
         if (audioUrl != null && audioUrl.contains('-us.')) break;
       }
 
-      // ─── 품사별 정의 전체 추출 (최대 6개) ───
+      // 품사별 정의 전체 추출 (최대 6개)
       final List<_MeaningItem> meanings = [];
       for (final entry in data) {
         final entryMeanings = entry['meanings'];
@@ -184,7 +250,7 @@ class DictionaryService {
           final pos = m['partOfSpeech']?.toString() ?? '';
           final defs = m['definitions'];
           if (defs is! List) continue;
-          for (final d in defs.take(2)) { // 품사당 최대 2개
+          for (final d in defs.take(2)) {
             final def = d['definition']?.toString() ?? '';
             final ex = d['example']?.toString();
             if (def.isEmpty) continue;
@@ -193,7 +259,7 @@ class DictionaryService {
               definition: def,
               example: ex,
             ));
-            if (meanings.length >= 6) break; // 전체 최대 6개
+            if (meanings.length >= 6) break;
           }
           if (meanings.length >= 6) break;
         }
@@ -202,7 +268,7 @@ class DictionaryService {
 
       return _EnglishData(meanings: meanings, audioUrl: audioUrl);
     } catch (e) {
-      if (kDebugMode) debugPrint('Dictionary lookup error: $e');
+      if (kDebugMode) debugPrint('[Dict] English lookup error: $e');
       return const _EnglishData();
     }
   }

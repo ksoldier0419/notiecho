@@ -39,9 +39,10 @@ class _RecordScreenState extends State<RecordScreen>
   bool _permissionDenied = false;
   String? _myVoicePath;
   String? _nativeAudioUrl;
-  List<DictMeaning> _allMeanings = []; // 선택 가능한 전체 뜻 목록
+  List<DictMeaning> _allMeanings = [];
   final Set<String> _selectedTags = {};
   String _statusMessage = '버튼을 누르고 단어를 말하세요';
+  double _currentDb = -60.0; // 실시간 진폭 (녹음 레벨 표시용)
 
   @override
   void initState() {
@@ -181,7 +182,6 @@ class _RecordScreenState extends State<RecordScreen>
 
   // ─── 내 발음 녹음 시작 ────────────────────────────────────────
   Future<void> _startMyVoiceRecording() async {
-    // STT가 켜져 있으면 먼저 중단
     if (_isListening) {
       try { await _speech.stop(); } catch (_) {}
       setState(() => _isListening = false);
@@ -191,8 +191,22 @@ class _RecordScreenState extends State<RecordScreen>
     setState(() {
       _isRecordingVoice = true;
       _myVoicePath = null;
-      _statusMessage = '내 발음 녹음 중... 🔴 단어를 크게 말해보세요';
+      _currentDb = -60.0;
+      _statusMessage = '녹음 중 🔴 단어를 말하면 자동으로 멈춰요';
     });
+
+    // 무음 자동 종료 콜백 등록
+    _recorder.onSilenceDetected = () {
+      if (mounted && _isRecordingVoice) {
+        _stopMyVoiceRecording();
+      }
+    };
+    // 실시간 레벨 미터 콜백
+    _recorder.onAmplitudeChanged = (db) {
+      if (mounted && _isRecordingVoice) {
+        setState(() => _currentDb = db);
+      }
+    };
 
     final started = await _recorder.start();
     if (!started) {
@@ -207,13 +221,16 @@ class _RecordScreenState extends State<RecordScreen>
 
   // ─── 내 발음 녹음 중단 ────────────────────────────────────────
   Future<void> _stopMyVoiceRecording() async {
+    _recorder.onSilenceDetected = null;
+    _recorder.onAmplitudeChanged = null;
     final path = await _recorder.stop();
     if (!mounted) return;
     setState(() {
       _isRecordingVoice = false;
       _myVoicePath = path;
+      _currentDb = -60.0;
       _statusMessage = path != null
-          ? '녹음 완료! ▶ 버튼으로 들어보세요 ✅'
+          ? '녹음 완료! 원어민↔내 발음 비교해 보세요 🎧'
           : '녹음 실패 — 다시 시도해 주세요';
     });
     if (kDebugMode) debugPrint('[MyVoice] saved to: $path');
@@ -577,30 +594,33 @@ class _RecordScreenState extends State<RecordScreen>
             ),
             const SizedBox(height: 12),
 
-            // 원어민 발음 버튼
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppTheme.deepIndigo,
-                  side: const BorderSide(color: AppTheme.teal),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            // 원어민 발음 버튼 (녹음 완료 전에만 표시, 완료 후엔 비교 버튼에서 제공)
+            if (_myVoicePath == null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.deepIndigo,
+                      side: const BorderSide(color: AppTheme.teal),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.volume_up, size: 20),
+                    label: Text(
+                      _nativeAudioUrl != null ? '원어민 발음 듣기' : '표준 발음 듣기',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () {
+                      final w = _wordCtrl.text.trim();
+                      if (w.isNotEmpty) {
+                        AudioService().pronounce(w, audioUrl: _nativeAudioUrl);
+                      }
+                    },
+                  ),
                 ),
-                icon: const Icon(Icons.volume_up, size: 20),
-                label: Text(
-                  _nativeAudioUrl != null ? '원어민 발음 듣기' : '표준 발음 듣기',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                onPressed: () {
-                  final w = _wordCtrl.text.trim();
-                  if (w.isNotEmpty) {
-                    AudioService().pronounce(w, audioUrl: _nativeAudioUrl);
-                  }
-                },
               ),
-            ),
-            const SizedBox(height: 10),
 
             // 내 발음 녹음 버튼 (STT와 완전히 분리)
             _buildMyVoiceSection(),
@@ -710,64 +730,182 @@ class _RecordScreenState extends State<RecordScreen>
                   : Colors.grey.shade300,
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 녹음 시작/중지 버튼
-          GestureDetector(
-            onTap: _isRecordingVoice ? _stopMyVoiceRecording : _startMyVoiceRecording,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _isRecordingVoice ? Colors.red : AppTheme.indigo,
-              ),
-              child: Icon(
-                _isRecordingVoice ? Icons.stop : Icons.mic,
-                color: Colors.white,
-                size: 26,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _isRecordingVoice
-                      ? '🔴 녹음 중... 단어를 크게 말하세요'
-                      : _myVoicePath != null
-                          ? '✅ 내 발음 녹음 완료'
-                          : '내 발음 녹음하기',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: _isRecordingVoice ? Colors.red.shade700 : null,
+          Row(
+            children: [
+              // 녹음 시작/중지 버튼
+              GestureDetector(
+                onTap: _isRecordingVoice ? _stopMyVoiceRecording : _startMyVoiceRecording,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _isRecordingVoice ? Colors.red : AppTheme.indigo,
+                  ),
+                  child: Icon(
+                    _isRecordingVoice ? Icons.stop : Icons.mic,
+                    color: Colors.white,
+                    size: 26,
                   ),
                 ),
-                Text(
-                  _isRecordingVoice
-                      ? '버튼을 다시 눌러 중지'
-                      : _myVoicePath != null
-                          ? '▶ 버튼으로 내 녹음을 들을 수 있어요'
-                          : '원어민 발음을 듣고 따라 말해보세요',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isRecordingVoice
+                          ? '🔴 녹음 중 — 말하면 자동으로 멈춰요'
+                          : _myVoicePath != null
+                              ? '✅ 내 발음 녹음 완료'
+                              : '내 발음 녹음하기',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: _isRecordingVoice ? Colors.red.shade700 : null,
+                      ),
+                    ),
+                    Text(
+                      _isRecordingVoice
+                          ? '2초 무음 시 자동 종료 · 잡음제거 ON'
+                          : _myVoicePath != null
+                              ? '원어민↔내 발음 비교 후 저장하세요'
+                              : '원어민 발음을 듣고 따라 말해보세요',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              // 수동 중지 버튼 (녹음 중)
+              if (_isRecordingVoice)
+                TextButton(
+                  onPressed: _stopMyVoiceRecording,
+                  child: const Text('중지', style: TextStyle(fontSize: 12)),
+                ),
+            ],
           ),
-          // 내 녹음 재생 버튼
-          if (_myVoicePath != null && !_isRecordingVoice)
-            IconButton(
-              icon: const Icon(Icons.play_circle_filled, size: 32),
-              color: AppTheme.indigo,
-              tooltip: '내 녹음 듣기',
-              onPressed: () => AudioService().playMyVoice(_myVoicePath!),
-            ),
+
+          // 녹음 중 레벨 미터
+          if (_isRecordingVoice) ...[
+            const SizedBox(height: 10),
+            _buildLevelMeter(),
+          ],
+
+          // 녹음 완료 후 비교/재녹음 버튼
+          if (_myVoicePath != null && !_isRecordingVoice) ...[
+            const SizedBox(height: 10),
+            _buildCompareButtons(),
+          ],
         ],
       ),
+    );
+  }
+
+  /// 실시간 녹음 레벨 미터
+  Widget _buildLevelMeter() {
+    // _currentDb 범위: -60 ~ 0 dB → 0.0 ~ 1.0 으로 정규화
+    final level = ((_currentDb + 60) / 60).clamp(0.0, 1.0);
+    final isSpeaking = _currentDb > -35.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(
+              isSpeaking ? Icons.graphic_eq : Icons.mic_none,
+              size: 14,
+              color: isSpeaking ? Colors.red : Colors.grey.shade400,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: level,
+                  minHeight: 8,
+                  backgroundColor: Colors.grey.shade200,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    level > 0.7
+                        ? Colors.red
+                        : level > 0.4
+                            ? Colors.orange
+                            : AppTheme.teal,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              isSpeaking ? '말하는 중' : '무음 감지 중...',
+              style: TextStyle(
+                fontSize: 10,
+                color: isSpeaking ? Colors.red.shade600 : Colors.grey.shade400,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// 원어민 ↔ 내 발음 비교 + 재녹음 버튼
+  Widget _buildCompareButtons() {
+    return Row(
+      children: [
+        // 원어민 발음 재생
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: () {
+              final w = _wordCtrl.text.trim();
+              if (w.isNotEmpty) {
+                AudioService().pronounce(w, audioUrl: _nativeAudioUrl);
+              }
+            },
+            icon: const Icon(Icons.record_voice_over, size: 16),
+            label: const Text('원어민', style: TextStyle(fontSize: 12)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.deepIndigo,
+              side: const BorderSide(color: AppTheme.teal),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // 내 발음 재생
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: () => AudioService().playMyVoice(_myVoicePath!),
+            icon: const Icon(Icons.play_circle_outline, size: 16),
+            label: const Text('내 발음', style: TextStyle(fontSize: 12)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.indigo,
+              side: BorderSide(color: AppTheme.indigo.withValues(alpha: 0.5)),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // 재녹음
+        OutlinedButton.icon(
+          onPressed: _startMyVoiceRecording,
+          icon: const Icon(Icons.replay, size: 16),
+          label: const Text('재녹음', style: TextStyle(fontSize: 12)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.orange.shade700,
+            side: BorderSide(color: Colors.orange.shade300),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      ],
     );
   }
 
