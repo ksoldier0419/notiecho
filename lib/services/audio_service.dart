@@ -85,14 +85,35 @@ class AudioService {
     } catch (_) {}
   }
 
-  /// 원어민 발음 재생: 사전 mp3가 있으면 그것을, 없으면 TTS
-  /// → 구글 사전 수준의 실제 원어민 녹음 품질
+  /// 원어민 발음 재생 우선순위:
+  /// 1) 구글 번역 TTS mp3 (구글 검색 발음과 동일 계열의 신경망 음성, 구문도 지원)
+  /// 2) 사전 API 원어민 녹음 mp3
+  /// 3) 기기 TTS 폴백
   Future<void> pronounce(String word, {String? audioUrl}) async {
+    final w = word.trim();
+    if (w.isEmpty) return;
+
+    // 1순위: 구글 TTS mp3 (고품질 신경망 음성)
+    final gUrl = _googleTtsUrl(w);
+    if (await _playUrl(gUrl)) return;
+
+    // 2순위: 사전 원어민 녹음
     if (audioUrl != null && audioUrl.isNotEmpty) {
-      final ok = await _playUrl(audioUrl);
-      if (ok) return;
+      if (await _playUrl(audioUrl)) return;
     }
-    await speak(word);
+
+    // 3순위: 기기 TTS
+    await speak(w);
+  }
+
+  /// 구글 번역 TTS mp3 URL 생성
+  String _googleTtsUrl(String text) {
+    return Uri.https('translate.google.com', '/translate_tts', {
+      'ie': 'UTF-8',
+      'tl': 'en',
+      'client': 'tw-ob',
+      'q': text,
+    }).toString();
   }
 
   /// AI 목소리(TTS)로 단어 발음 (완료까지 대기)
@@ -111,22 +132,25 @@ class AudioService {
     } catch (_) {}
   }
 
-  /// URL 오디오 재생 (원어민 발음 mp3) - 완료까지 대기, 성공 여부 반환
+  /// URL 오디오 재생 (발음 mp3) - 완료까지 대기, 성공 여부 반환
   Future<bool> _playUrl(String url) async {
+    StreamSubscription? sub;
     try {
       final completer = Completer<void>();
-      late StreamSubscription sub;
       sub = _player.onPlayerComplete.listen((_) {
-        sub.cancel();
         if (!completer.isCompleted) completer.complete();
       });
       await _player.play(UrlSource(url));
-      await completer.future.timeout(const Duration(seconds: 8), onTimeout: () {
-        sub.cancel();
-      });
+      await completer.future.timeout(const Duration(seconds: 8));
+      await sub.cancel();
+      return true;
+    } on TimeoutException {
+      // 재생은 시작됐으나 완료 이벤트만 누락된 경우 → 성공 처리
+      await sub?.cancel();
       return true;
     } catch (e) {
       if (kDebugMode) debugPrint('playUrl error: $e');
+      await sub?.cancel();
       return false;
     }
   }
