@@ -50,7 +50,7 @@ dependencies:
   flutter_tts: ^4.2.0
 
   # Voice recording (my voice) - web & android support
-  record: ^5.1.2
+  record: ^6.0.0
 
   # Audio playback - web & android support
   audioplayers: ^6.1.0
