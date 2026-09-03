@@ -139,7 +139,7 @@ class _TestScreenState extends State<TestScreen> {
   Widget build(BuildContext context) {
     final store = context.watch<WordStore>();
     return Scaffold(
-      appBar: AppBar(title: const Text('시험 · 장기기억 승격')),
+
       body: _testStarted ? _buildTestView(store) : _buildSetupView(store),
     );
   }

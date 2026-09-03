@@ -321,17 +321,7 @@ class _RecordScreenState extends State<RecordScreen>
   Widget build(BuildContext context) {
     final store = context.watch<WordStore>();
     return Scaffold(
-      appBar: AppBar(
-        title: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.graphic_eq, size: 22),
-            SizedBox(width: 8),
-            Text('NotiEcho',
-                style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-          ],
-        ),
-      ),
+
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(

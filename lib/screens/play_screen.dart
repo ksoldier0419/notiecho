@@ -162,7 +162,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final words = _filteredWords(store);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('플레이 · 반복 청취')),
+
       body: Column(
         children: [
           _buildFilterBar(store),

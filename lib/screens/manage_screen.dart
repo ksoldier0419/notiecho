@@ -20,7 +20,7 @@ class _ManageScreenState extends State<ManageScreen> {
   Widget build(BuildContext context) {
     final store = context.watch<WordStore>();
     return Scaffold(
-      appBar: AppBar(title: const Text('관리')),
+
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
