@@ -28,6 +28,7 @@ class _PlayScreenState extends State<PlayScreen> {
   int _repeatPerWord = 2; // 단어당 반복 횟수
   double _gapSeconds = 1.5; // 단어 사이 간격
   String _voiceMode = 'ai'; // ai | mine | both
+  String _contentMode = 'word'; // word | meaning | both
   String? _currentPlayingId;
   int _cycleCount = 0;
 
@@ -56,26 +57,53 @@ class _PlayScreenState extends State<PlayScreen> {
 
   Future<void> _playWord(WordEntry w) async {
     final audio = AudioService();
+
     for (int i = 0; i < _repeatPerWord; i++) {
       if (_stopRequested) return;
-      if (_voiceMode == 'mine' && w.myVoicePath != null) {
-        await audio.playMyVoice(w.myVoicePath!);
-      } else if (_voiceMode == 'both' && w.myVoicePath != null) {
-        await audio.pronounce(w.word, audioUrl: w.nativeAudioUrl);
-        if (_stopRequested) return;
-        await Future.delayed(const Duration(milliseconds: 400));
-        await audio.playMyVoice(w.myVoicePath!);
+
+      if (_contentMode == 'word') {
+        // ── 단어만 재생 ──
+        await _playVoice(audio, w);
+
+      } else if (_contentMode == 'meaning') {
+        // ── 뜻만 TTS로 재생 ──
+        if (w.meaning.isNotEmpty) {
+          await audio.speakKorean(w.meaning);
+        }
+
       } else {
-        await audio.pronounce(w.word, audioUrl: w.nativeAudioUrl);
+        // ── 단어 → 뜻 번갈아 재생 ──
+        await _playVoice(audio, w);
+        if (_stopRequested) return;
+        if (w.meaning.isNotEmpty) {
+          await Future.delayed(Duration(milliseconds: (_gapSeconds * 600).round()));
+          await audio.speakKorean(w.meaning);
+        }
       }
+
       if (i < _repeatPerWord - 1 && !_stopRequested) {
         await Future.delayed(Duration(milliseconds: (_gapSeconds * 500).round()));
       }
     }
+
     // 재생 횟수 기록
     w.playCount += _repeatPerWord;
     if (mounted) {
       unawaited(context.read<WordStore>().updateWord(w));
+    }
+  }
+
+  /// 목소리 모드에 따라 단어 발음 재생
+  Future<void> _playVoice(AudioService audio, WordEntry w) async {
+    if (_voiceMode == 'mine' && w.myVoicePath != null) {
+      await audio.playMyVoice(w.myVoicePath!);
+    } else if (_voiceMode == 'both' && w.myVoicePath != null) {
+      await audio.pronounce(w.word, audioUrl: w.nativeAudioUrl);
+      if (_stopRequested) return;
+      await Future.delayed(const Duration(milliseconds: 400));
+      await audio.playMyVoice(w.myVoicePath!);
+    } else {
+      await audio.pronounce(w.word, audioUrl: w.nativeAudioUrl);
     }
   }
 
@@ -277,12 +305,26 @@ class _PlayScreenState extends State<PlayScreen> {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    _isPlayingAll
-                        ? '재생 중 · ${_cycleCount + 1}회차 반복'
-                        : '$playlistSize개 단어 대기 중',
-                    style: TextStyle(
-                        fontSize: 13, color: Colors.grey.shade700),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isPlayingAll
+                            ? '재생 중 · ${_cycleCount + 1}회차 반복'
+                            : '$playlistSize개 단어 대기 중',
+                        style: TextStyle(
+                            fontSize: 13, color: Colors.grey.shade700),
+                      ),
+                      const SizedBox(height: 2),
+                      // 현재 콘텐츠 모드 표시
+                      Row(
+                        children: [
+                          _contentModeBadge(),
+                          const SizedBox(width: 6),
+                          _voiceModeBadge(),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
                 IconButton(
@@ -348,7 +390,47 @@ class _PlayScreenState extends State<PlayScreen> {
                 },
               ),
               const SizedBox(height: 8),
-              const Text('목소리 선택'),
+              // ── 재생 콘텐츠 모드 ──
+              const Text('재생 내용',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                    value: 'word',
+                    label: Text('단어만'),
+                    icon: Icon(Icons.volume_up, size: 15),
+                  ),
+                  ButtonSegment(
+                    value: 'meaning',
+                    label: Text('뜻만'),
+                    icon: Icon(Icons.translate, size: 15),
+                  ),
+                  ButtonSegment(
+                    value: 'both',
+                    label: Text('단어+뜻'),
+                    icon: Icon(Icons.swap_horiz, size: 15),
+                  ),
+                ],
+                selected: {_contentMode},
+                onSelectionChanged: (s) {
+                  setSheet(() {});
+                  setState(() => _contentMode = s.first);
+                },
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _contentMode == 'word'
+                    ? '단어 발음만 재생합니다'
+                    : _contentMode == 'meaning'
+                        ? '뜻(한국어)만 TTS로 읽어줍니다'
+                        : '단어 발음 → 뜻 순서로 번갈아 재생합니다',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+              const Divider(height: 24),
+              // ── 목소리 선택 ──
+              const Text('목소리 선택',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               SegmentedButton<String>(
                 segments: const [
@@ -362,7 +444,7 @@ class _PlayScreenState extends State<PlayScreen> {
                   setState(() => _voiceMode = s.first);
                 },
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 '※ 내 목소리 녹음이 없는 단어는 AI 발음으로 재생됩니다',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
@@ -461,6 +543,51 @@ class _PlayScreenState extends State<PlayScreen> {
           ),
           onPressed: _isPlayingAll ? null : () => _playSingle(w),
         ),
+      ),
+    );
+  }
+
+  Widget _contentModeBadge() {
+    final labels = {'word': '단어만', 'meaning': '뜻만', 'both': '단어+뜻'};
+    final icons = {
+      'word': Icons.volume_up,
+      'meaning': Icons.translate,
+      'both': Icons.swap_horiz,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.indigo.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icons[_contentMode], size: 11, color: AppTheme.deepIndigo),
+          const SizedBox(width: 3),
+          Text(labels[_contentMode]!,
+              style: const TextStyle(fontSize: 10, color: AppTheme.deepIndigo)),
+        ],
+      ),
+    );
+  }
+
+  Widget _voiceModeBadge() {
+    final labels = {'ai': 'AI', 'mine': '내 목소리', 'both': '둘 다'};
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppTheme.teal.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.mic, size: 11, color: AppTheme.teal),
+          const SizedBox(width: 3),
+          Text(labels[_voiceMode]!,
+              style: const TextStyle(fontSize: 10, color: AppTheme.teal)),
+        ],
       ),
     );
   }

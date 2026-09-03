@@ -124,14 +124,53 @@ class AudioService {
     }).toString();
   }
 
-  /// AI 목소리(TTS)로 단어 발음 (완료까지 대기)
+  /// AI 목소리(TTS)로 단어 발음 — 영어 (완료까지 대기)
   Future<void> speak(String text) async {
     if (!_ttsReady) await init();
     try {
+      await _tts.setLanguage('en-US');
       await _tts.speak(text);
     } catch (e) {
       if (kDebugMode) debugPrint('TTS speak error: $e');
     }
+  }
+
+  /// 한국어 TTS로 뜻 읽기 (뜻만 재생 모드용)
+  Future<void> speakKorean(String text) async {
+    if (!_ttsReady) await init();
+    try {
+      // 뜻 텍스트에서 영어 정의 부분 제거 — "(noun) ..." 이후는 생략
+      final cleanText = _extractKoreanPart(text);
+      if (cleanText.isEmpty) return;
+      await _tts.setLanguage('ko-KR');
+      await _tts.setSpeechRate(0.5);
+      await _tts.speak(cleanText);
+      // 영어 모드로 복원
+      await _tts.setLanguage('en-US');
+      await _tts.setSpeechRate(_speechRate);
+    } catch (e) {
+      if (kDebugMode) debugPrint('Korean TTS speak error: $e');
+      // 복원 시도
+      try { await _tts.setLanguage('en-US'); } catch (_) {}
+    }
+  }
+
+  /// 뜻 문자열에서 한국어 부분만 추출
+  /// 예) "인사하다\n(verb) used to greet..." → "인사하다"
+  String _extractKoreanPart(String meaning) {
+    final lines = meaning.split('\n');
+    final koreanLines = lines.where((l) {
+      final trimmed = l.trim();
+      if (trimmed.isEmpty) return false;
+      // (품사) 로 시작하는 영어 정의 줄 제외
+      if (trimmed.startsWith('(') && RegExp(r'^\([a-z]+\)').hasMatch(trimmed)) {
+        return false;
+      }
+      // "예)" 로 시작하는 예문 제외
+      if (trimmed.startsWith('예)')) return false;
+      return true;
+    }).toList();
+    return koreanLines.isNotEmpty ? koreanLines.join(', ') : meaning.split('\n').first;
   }
 
   Future<void> stopSpeak() async {

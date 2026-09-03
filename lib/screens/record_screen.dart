@@ -39,6 +39,7 @@ class _RecordScreenState extends State<RecordScreen>
   bool _permissionDenied = false;
   String? _myVoicePath;
   String? _nativeAudioUrl;
+  List<DictMeaning> _allMeanings = []; // 선택 가능한 전체 뜻 목록
   final Set<String> _selectedTags = {};
   String _statusMessage = '버튼을 누르고 단어를 말하세요';
 
@@ -136,6 +137,7 @@ class _RecordScreenState extends State<RecordScreen>
       _meaningCtrl.clear();
       _myVoicePath = null;
       _nativeAudioUrl = null;
+      _allMeanings = [];
       _statusMessage = '듣고 있어요... 단어를 말하세요 🎙';
       _isListening = true;
       _permissionDenied = false;
@@ -221,12 +223,17 @@ class _RecordScreenState extends State<RecordScreen>
   Future<void> _lookupMeaning() async {
     final word = _wordCtrl.text.trim();
     if (word.isEmpty) return;
-    setState(() => _lookingUp = true);
+    setState(() {
+      _lookingUp = true;
+      _allMeanings = [];
+    });
     final result = await DictionaryService.lookup(word);
     if (!mounted) return;
     setState(() {
       _lookingUp = false;
       _nativeAudioUrl = result.audioUrl;
+      _allMeanings = result.allMeanings;
+      // 뜻 필드가 비어있을 때만 기본값 채움
       if (result.meaning != null && _meaningCtrl.text.trim().isEmpty) {
         _meaningCtrl.text = result.meaning!;
       }
@@ -268,6 +275,7 @@ class _RecordScreenState extends State<RecordScreen>
       _meaningCtrl.clear();
       _myVoicePath = null;
       _nativeAudioUrl = null;
+      _allMeanings = [];
       _selectedTags.clear();
       _statusMessage = '버튼을 누르고 단어를 말하세요';
     });
@@ -371,6 +379,107 @@ class _RecordScreenState extends State<RecordScreen>
         ),
       ),
     );
+  }
+
+  // ─── 뜻 선택 Chip ─────────────────────────────────────────────
+  Widget _buildMeaningChip(DictMeaning m) {
+    // 현재 뜻 필드에 이 항목이 선택됐는지 확인
+    final isSelected = _meaningCtrl.text.contains(m.definition) ||
+        (m.korean != null && _meaningCtrl.text.contains(m.korean!));
+
+    final posColor = _posColor(m.partOfSpeech);
+
+    return InkWell(
+      onTap: () {
+        // 탭하면 뜻 필드에 적용
+        final parts = <String>[];
+        if (m.korean != null && m.korean!.isNotEmpty) parts.add(m.korean!);
+        parts.add('(${m.partOfSpeech.isNotEmpty ? m.partOfSpeech : "def"}) ${m.definition}');
+        if (m.example != null) parts.add('예) ${m.example}');
+        setState(() => _meaningCtrl.text = parts.join('\n'));
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppTheme.lightTeal.withValues(alpha: 0.35)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? AppTheme.teal : Colors.grey.shade200,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 품사 뱃지
+            if (m.partOfSpeech.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(right: 7, top: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: posColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: posColor.withValues(alpha: 0.4)),
+                ),
+                child: Text(
+                  m.partOfSpeech,
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: posColor,
+                      fontWeight: FontWeight.bold),
+                ),
+              ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (m.korean != null && m.korean!.isNotEmpty)
+                    Text(
+                      m.korean!,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
+                  Text(
+                    m.definition,
+                    style: TextStyle(
+                        fontSize: 11, color: Colors.grey.shade600),
+                  ),
+                  if (m.example != null)
+                    Text(
+                      '예) ${m.example}',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade400,
+                          fontStyle: FontStyle.italic),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              const Icon(Icons.check_circle, color: AppTheme.teal, size: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 품사별 색상
+  Color _posColor(String pos) {
+    switch (pos.toLowerCase()) {
+      case 'noun': return Colors.blue.shade600;
+      case 'verb': return Colors.green.shade600;
+      case 'adjective': return Colors.orange.shade600;
+      case 'adverb': return Colors.purple.shade600;
+      case 'preposition': return Colors.red.shade400;
+      case 'conjunction': return Colors.teal.shade600;
+      default: return Colors.grey.shade600;
+    }
   }
 
   // ─── STT 버튼 ─────────────────────────────────────────────────
@@ -524,12 +633,39 @@ class _RecordScreenState extends State<RecordScreen>
                 ),
               ],
             ),
+            // 뜻 선택 버튼 목록 (사전 조회 결과가 있을 때)
+            if (_allMeanings.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '뜻 선택 (탭하면 적용)',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade500,
+                          fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 6),
+                    ..._allMeanings.map((m) => _buildMeaningChip(m)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             TextField(
               controller: _meaningCtrl,
-              maxLines: 2,
+              maxLines: 3,
               minLines: 1,
               decoration: InputDecoration(
-                hintText: '뜻 입력 (자동 조회 또는 직접 입력)',
+                hintText: '뜻 입력 (위에서 선택하거나 직접 입력)',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
