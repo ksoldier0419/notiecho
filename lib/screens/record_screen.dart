@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../models/word_entry.dart';
@@ -33,6 +35,7 @@ class _RecordScreenState extends State<RecordScreen>
   bool _isListening = false;
   bool _hasResult = false;
   bool _lookingUp = false;
+  bool _permissionDenied = false;
   String? _myVoicePath;
   String? _nativeAudioUrl;
   final Set<String> _selectedTags = {};
@@ -44,33 +47,100 @@ class _RecordScreenState extends State<RecordScreen>
     _pulseCtrl =
         AnimationController(vsync: this, duration: const Duration(seconds: 2))
           ..repeat();
-    _initSpeech();
+    _requestPermissionAndInit();
+  }
+
+  /// 마이크 권한 요청 → 권한 허용 시 STT 초기화
+  Future<void> _requestPermissionAndInit() async {
+    // 웹은 브라우저가 권한을 처리하므로 바로 초기화
+    if (kIsWeb) {
+      await _initSpeech();
+      return;
+    }
+
+    final status = await Permission.microphone.status;
+
+    if (status.isGranted) {
+      await _initSpeech();
+    } else if (status.isPermanentlyDenied) {
+      // 설정 앱에서만 허용 가능한 상태
+      if (mounted) {
+        setState(() {
+          _permissionDenied = true;
+          _statusMessage = '마이크 권한이 차단되었습니다. 설정에서 허용해 주세요.';
+        });
+      }
+    } else {
+      // 권한 요청 팝업 표시
+      final result = await Permission.microphone.request();
+      if (result.isGranted) {
+        await _initSpeech();
+      } else if (result.isPermanentlyDenied) {
+        if (mounted) {
+          setState(() {
+            _permissionDenied = true;
+            _statusMessage = '마이크 권한이 차단되었습니다. 설정에서 허용해 주세요.';
+          });
+        }
+      } else {
+        // 거부됨 (팝업에서 취소)
+        if (mounted) {
+          setState(() {
+            _permissionDenied = true;
+            _statusMessage = '마이크 권한이 필요합니다. 버튼을 눌러 다시 허용해 주세요.';
+          });
+        }
+      }
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _initSpeech() async {
     try {
       _sttAvailable = await _speech.initialize(
         onStatus: (status) {
+          if (kDebugMode) debugPrint('[STT] status: $status');
           if (status == 'notListening' || status == 'done') {
             if (mounted && _isListening) _stopListening();
           }
         },
         onError: (e) {
+          if (kDebugMode) debugPrint('[STT] error: ${e.errorMsg}');
           if (mounted) {
             setState(() {
               _isListening = false;
-              _statusMessage = '음성 인식 오류 — 다시 시도하거나 직접 입력하세요';
+              // 권한 오류일 경우 구체적인 안내
+              if (e.errorMsg.contains('permission') ||
+                  e.errorMsg.contains('audio')) {
+                _statusMessage = '마이크 권한을 허용해 주세요 (설정 > 앱 > 마이크)';
+              } else {
+                _statusMessage = '음성 인식 오류 — 다시 시도하거나 직접 입력하세요';
+              }
             });
           }
         },
       );
-    } catch (_) {
+      if (kDebugMode) debugPrint('[STT] available: $_sttAvailable');
+    } catch (e) {
+      if (kDebugMode) debugPrint('[STT] init exception: $e');
       _sttAvailable = false;
     }
     if (mounted) setState(() {});
   }
 
   Future<void> _startListening() async {
+    // 권한이 거부된 상태라면 재요청 또는 설정으로 안내
+    if (!kIsWeb && _permissionDenied) {
+      final status = await Permission.microphone.status;
+      if (status.isPermanentlyDenied) {
+        _showGoToSettingsDialog();
+        return;
+      }
+      // 다시 한번 요청 시도
+      await _requestPermissionAndInit();
+      if (!_sttAvailable) return;
+    }
+
     AudioService().stopAll();
     setState(() {
       _hasResult = false;
@@ -80,6 +150,7 @@ class _RecordScreenState extends State<RecordScreen>
       _nativeAudioUrl = null;
       _statusMessage = '듣고 있어요... 단어를 말하세요 🎙';
       _isListening = true;
+      _permissionDenied = false;
     });
 
     // 내 목소리 녹음 시작 (STT와 동시)
@@ -98,7 +169,36 @@ class _RecordScreenState extends State<RecordScreen>
           }
         },
       );
+    } else {
+      // STT 불가 시에도 내 목소리 녹음은 계속 (직접 입력 가능)
+      if (kDebugMode) debugPrint('[STT] not available, recording voice only');
     }
+  }
+
+  void _showGoToSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('마이크 권한 필요'),
+        content: const Text(
+          '음성 인식을 사용하려면 마이크 권한이 필요합니다.\n\n'
+          '설정 앱 > NotiEcho > 권한 > 마이크를 "허용"으로 변경해 주세요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              openAppSettings(); // permission_handler 제공
+            },
+            child: const Text('설정 열기'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _stopListening() async {
@@ -216,8 +316,31 @@ class _RecordScreenState extends State<RecordScreen>
             Text(
               _statusMessage,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: _permissionDenied ? Colors.red.shade600 : null,
+              ),
             ),
+            if (_permissionDenied) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final status = await Permission.microphone.status;
+                  if (status.isPermanentlyDenied) {
+                    _showGoToSettingsDialog();
+                  } else {
+                    await _requestPermissionAndInit();
+                  }
+                },
+                icon: const Icon(Icons.mic_off, size: 18),
+                label: const Text('마이크 권한 허용하기'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.red.shade600,
+                  side: BorderSide(color: Colors.red.shade300),
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
             if (_hasResult || _isListening) _buildResultCard(store),
             if (!_hasResult && !_isListening) _buildManualEntryHint(),

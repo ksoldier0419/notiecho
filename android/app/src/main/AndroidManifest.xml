@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.BLUETOOTH"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <!-- 음성인식 기능 선언 (Google Play 음성인식 필터용) -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
 
     <application
         android:label="Noti Echo"
@@ -47,9 +49,13 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        <!-- 음성인식 서비스 쿼리 -->
+        <!-- 음성인식 서비스 쿼리 (speech_to_text 필수) -->
         <intent>
             <action android:name="android.speech.RecognitionService"/>
+        </intent>
+        <!-- Google 음성인식 인텐트 쿼리 -->
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH"/>
         </intent>
         <!-- TTS 서비스 쿼리 -->
         <intent>
@@ -57,4 +63,5 @@
         </intent>
     </queries>
 </manifest>
+
 
