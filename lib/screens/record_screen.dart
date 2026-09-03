@@ -306,22 +306,12 @@ class _RecordScreenState extends State<RecordScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            const Row(
               children: [
-                const Icon(Icons.edit_note, color: AppTheme.teal, size: 20),
-                const SizedBox(width: 6),
-                const Text('오리지널 단어로 정정',
+                Icon(Icons.edit_note, color: AppTheme.teal, size: 20),
+                SizedBox(width: 6),
+                Text('오리지널 단어로 정정',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const Spacer(),
-                if (_myVoicePath != null)
-                  Tooltip(
-                    message: '내 녹음 듣기',
-                    child: IconButton(
-                      icon: const Icon(Icons.record_voice_over,
-                          color: AppTheme.indigo),
-                      onPressed: () => AudioService().playMyVoice(_myVoicePath!),
-                    ),
-                  ),
               ],
             ),
             const SizedBox(height: 8),
@@ -332,16 +322,55 @@ class _RecordScreenState extends State<RecordScreen>
                 hintText: '단어 입력...',
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12)),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.volume_up, color: AppTheme.teal),
-                  tooltip: 'AI 발음 듣기',
-                  onPressed: () {
-                    final w = _wordCtrl.text.trim();
-                    if (w.isNotEmpty) AudioService().speak(w);
-                  },
-                ),
               ),
               onSubmitted: (_) => _lookupMeaning(),
+            ),
+            const SizedBox(height: 10),
+            // 발음 듣기 버튼 영역
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.deepIndigo,
+                      side: const BorderSide(color: AppTheme.teal),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.volume_up, size: 20),
+                    label: const Text('표준 발음',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () {
+                      final w = _wordCtrl.text.trim();
+                      if (w.isNotEmpty) AudioService().speak(w);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _myVoicePath != null
+                          ? AppTheme.indigo
+                          : Colors.grey,
+                      side: BorderSide(
+                          color: _myVoicePath != null
+                              ? AppTheme.indigo
+                              : Colors.grey.shade300),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.record_voice_over, size: 20),
+                    label: const Text('내 녹음',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: _myVoicePath == null
+                        ? null
+                        : () => AudioService().playMyVoice(_myVoicePath!),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Row(
