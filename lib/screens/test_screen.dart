@@ -9,8 +9,8 @@ import '../services/audio_service.dart';
 import '../theme.dart';
 
 /// 시험 탭
-/// 1단계: 태그 선택 + 문항수 선택 → 시험 시작
-/// 2단계: 뜻(한국어) TTS → [모르겠어요] [말했어요] → 정답 표시 → 단계 이동
+/// 1단계: 태그 선택 + 문항수 + 시험모드 선택 → 시험 시작
+/// 2단계: TTS → [모르겠어요] [말했어요] → 정답 표시 → 단계 이동
 class TestScreen extends StatefulWidget {
   const TestScreen({super.key});
 
@@ -22,7 +22,9 @@ class _TestScreenState extends State<TestScreen> {
   // ── 시험 설정 ─────────────────────────────────────────────
   Set<String> _selectedTags = {};
   int? _targetCount; // null = 아직 미선택
-  String _examMode = 'meaning'; // 'meaning' = 뜻→단어 | 'word' = 단어→뜻
+  /// 'meaning' = 뜻(한국어) TTS → 영어 단어 말하기
+  /// 'word'    = 영어 단어 TTS → 한국어 뜻 말하기
+  String _examMode = 'meaning';
   bool _examStarted = false;
 
   // ── 시험 진행 ─────────────────────────────────────────────
@@ -74,8 +76,8 @@ class _TestScreenState extends State<TestScreen> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        '뜻(한국어)을 듣고 단어를 말하는 시험\n'
-                        '시험 범위: 단기3~15 + 장기30 (장기60·120 제외)',
+                        '시험 범위: 단기3~15 + 장기30 (장기60·120 제외)\n'
+                        '시험 모드를 선택하고 시험을 시작하세요',
                         style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 12,
@@ -88,7 +90,33 @@ class _TestScreenState extends State<TestScreen> {
             ),
             const SizedBox(height: 20),
 
-            // 태그 선택
+            // ── 시험 모드 선택 ──────────────────────────────
+            _buildLabel(Icons.tune, '시험 모드 선택'),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _modeButton(
+                    icon: Icons.translate,
+                    title: '뜻 → 단어',
+                    subtitle: '한국어 뜻을 듣고\n영어 단어를 말하기',
+                    value: 'meaning',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _modeButton(
+                    icon: Icons.spellcheck,
+                    title: '단어 → 뜻',
+                    subtitle: '영어 단어를 듣고\n한국어 뜻을 말하기',
+                    value: 'word',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // ── 태그 선택 ───────────────────────────────────
             _buildLabel(Icons.label, '태그 선택 (복수 선택 가능)'),
             const SizedBox(height: 8),
             if (store.tags.isEmpty)
@@ -134,7 +162,7 @@ class _TestScreenState extends State<TestScreen> {
               ),
             const SizedBox(height: 20),
 
-            // 문항 수 선택
+            // ── 문항 수 선택 ─────────────────────────────────
             _buildLabel(Icons.quiz, '문항 수 선택'),
             const SizedBox(height: 8),
             if (total == 0)
@@ -207,6 +235,52 @@ class _TestScreenState extends State<TestScreen> {
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 시험 모드 선택 버튼
+  Widget _modeButton({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required String value,
+  }) {
+    final selected = _examMode == value;
+    return GestureDetector(
+      onTap: () => setState(() => _examMode = value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+        decoration: BoxDecoration(
+          color: selected ? AppTheme.lightTeal : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? AppTheme.teal : Colors.grey.shade300,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon,
+                size: 28,
+                color: selected ? AppTheme.deepIndigo : Colors.grey.shade500),
+            const SizedBox(height: 6),
+            Text(title,
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: selected
+                        ? AppTheme.deepIndigo
+                        : Colors.grey.shade700)),
+            const SizedBox(height: 4),
+            Text(subtitle,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 11,
+                    color: selected ? AppTheme.teal : Colors.grey.shade500)),
           ],
         ),
       ),
@@ -361,8 +435,8 @@ class _TestScreenState extends State<TestScreen> {
       _examFinished = false;
     });
 
-    // 첫 문제 TTS 재생
-    _playCurrentMeaning();
+    // 첫 문제 TTS 재생 (모드에 따라 분기)
+    _playCurrentQuestion();
   }
 
   // ══════════════════════════════════════════════════════════
@@ -373,11 +447,18 @@ class _TestScreenState extends State<TestScreen> {
     final q = _questions[_currentIdx];
     final progress = (_currentIdx + 1) / _questions.length;
 
+    // 모드별 힌트 텍스트
+    final hintLabel = _examMode == 'meaning' ? '뜻 (한국어)' : '영어 단어';
+    final replayLabel = _examMode == 'meaning' ? '뜻 다시 듣기' : '단어 다시 듣기';
+    final questionText = _examMode == 'meaning'
+        ? (q.meaning.isNotEmpty ? q.meaning.split('\n').first : '(뜻 없음)')
+        : q.word;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            // 진행 바
+            // ── 상단 진행 바 + 중지 버튼 ──────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: Column(
@@ -385,11 +466,39 @@ class _TestScreenState extends State<TestScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('${_currentIdx + 1} / ${_questions.length}',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold)),
+                      // 중지 버튼
+                      GestureDetector(
+                        onTap: () => _confirmStop(store),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade200),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.stop_circle_outlined,
+                                  size: 16, color: Colors.red.shade600),
+                              const SizedBox(width: 4),
+                              Text('중지',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.red.shade600)),
+                            ],
+                          ),
+                        ),
+                      ),
+                      // 진행 카운트 + 정오답
                       Row(
                         children: [
+                          Text('${_currentIdx + 1} / ${_questions.length}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 12),
                           Icon(Icons.check_circle,
                               color: Colors.green.shade600, size: 16),
                           Text(' $_correctCount  ',
@@ -442,7 +551,7 @@ class _TestScreenState extends State<TestScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    // 뜻 카드
+                    // 질문 카드 (모드에 따라 내용 변경)
                     Card(
                       elevation: 3,
                       shape: RoundedRectangleBorder(
@@ -452,28 +561,29 @@ class _TestScreenState extends State<TestScreen> {
                         child: Column(
                           children: [
                             Text(
-                              '뜻 (한국어)',
+                              hintLabel,
                               style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.grey.shade500),
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              q.meaning.isNotEmpty
-                                  ? q.meaning.split('\n').first
-                                  : '(뜻 없음)',
+                              questionText,
                               textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                  fontSize: 22,
+                              style: TextStyle(
+                                  fontSize: _examMode == 'word' ? 28 : 22,
                                   fontWeight: FontWeight.bold,
-                                  height: 1.4),
+                                  height: 1.4,
+                                  color: _examMode == 'word'
+                                      ? AppTheme.deepIndigo
+                                      : null),
                             ),
                             const SizedBox(height: 16),
                             // TTS 재생 버튼
                             OutlinedButton.icon(
                               onPressed: _ttsPlaying
                                   ? null
-                                  : _playCurrentMeaning,
+                                  : _playCurrentQuestion,
                               icon: Icon(
                                 _ttsPlaying
                                     ? Icons.volume_up
@@ -482,7 +592,7 @@ class _TestScreenState extends State<TestScreen> {
                               ),
                               label: Text(_ttsPlaying
                                   ? '재생 중...'
-                                  : '다시 듣기'),
+                                  : replayLabel),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: AppTheme.deepIndigo,
                                 side: const BorderSide(
@@ -620,12 +730,13 @@ class _TestScreenState extends State<TestScreen> {
                         height: 1.4),
                   ),
                   const SizedBox(height: 4),
-                  // 단어→뜻 모드에서도 영어 발음 한 번 더 들을 수 있게
                   TextButton.icon(
                     onPressed: () => AudioService()
-                        .pronounce(q.word, audioUrl: q.nativeAudioUrl),
+                        .speakKorean(q.meaning.isNotEmpty
+                            ? q.meaning.split('\n').first
+                            : ''),
                     icon: const Icon(Icons.volume_up, size: 18),
-                    label: Text('${q.word} 발음 듣기'),
+                    label: const Text('뜻 발음 듣기'),
                     style: TextButton.styleFrom(
                         foregroundColor: AppTheme.teal),
                   ),
@@ -679,16 +790,66 @@ class _TestScreenState extends State<TestScreen> {
   }
 
   // ══════════════════════════════════════════════════════════
+  // 중지 확인 다이얼로그
+  // ══════════════════════════════════════════════════════════
+  Future<void> _confirmStop(WordStore store) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('시험 중지'),
+        content: Text(
+          '현재까지 $_correctCount개 정답, $_wrongCount개 오답입니다.\n'
+          '시험을 중지하고 설정 화면으로 돌아가시겠습니까?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('계속하기'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade600),
+            child: const Text('중지'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _examStarted = false;
+        _examFinished = false;
+        _questions = [];
+        _currentIdx = 0;
+        _answerRevealed = false;
+        _correctCount = 0;
+        _wrongCount = 0;
+        _results = [];
+        _ttsPlaying = false;
+      });
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════
   // 시험 액션
   // ══════════════════════════════════════════════════════════
 
-  Future<void> _playCurrentMeaning() async {
+  /// 현재 문제 TTS 재생 (모드에 따라 분기)
+  Future<void> _playCurrentQuestion() async {
     if (_questions.isEmpty) return;
     final q = _questions[_currentIdx];
-    if (q.meaning.isEmpty) return;
     setState(() => _ttsPlaying = true);
     try {
-      await AudioService().speakKorean(q.meaning.split('\n').first);
+      if (_examMode == 'meaning') {
+        // 뜻→단어 모드: 한국어 뜻 TTS
+        if (q.meaning.isNotEmpty) {
+          await AudioService().speakKorean(q.meaning.split('\n').first);
+        }
+      } else {
+        // 단어→뜻 모드: 영어 단어 TTS
+        await AudioService().pronounce(q.word, audioUrl: q.nativeAudioUrl);
+      }
     } finally {
       if (mounted) setState(() => _ttsPlaying = false);
     }
@@ -735,7 +896,8 @@ class _TestScreenState extends State<TestScreen> {
       _currentIdx++;
       _answerRevealed = false;
     });
-    _playCurrentMeaning();
+    // 다음 문제도 모드에 따라 분기
+    _playCurrentQuestion();
   }
 
   // ══════════════════════════════════════════════════════════
