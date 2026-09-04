@@ -1,16 +1,116 @@
-# noti_echo
+# NotiEcho 🔊
 
-A new Flutter project.
+> **소리 내어 반복하는 음성 단어 암기 앱**  
+> 단어를 듣고, 말하고, 기억하는 스마트 영단어 학습 앱
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## 📱 앱 정보
 
-A few resources to get you started if this is your first Flutter project:
+| 항목 | 내용 |
+|------|------|
+| 앱 이름 | Noti Echo |
+| 패키지 | `com.notiecho.vocab` |
+| 최신 버전 | v1.3.2 |
+| 플랫폼 | Android |
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 📥 APK 다운로드
+
+| 버전 | 파일 | 크기 |
+|------|------|------|
+| **v1.3.2** (최신) | [NotiEcho-v1.3.2.apk](releases/NotiEcho-v1.3.2.apk) | 51.5MB |
+
+---
+
+## 📋 버전별 주요 기능
+
+### v1.3.2 (최신)
+- ✅ **시험 중지 버튼** 추가 — 시험 진행 중 언제든 중지 가능, 현재 정오답 현황 확인 후 설정 화면으로 복귀
+- ✅ **시험 모드 2종** 추가
+  - **뜻 → 단어 모드**: 한국어 뜻 TTS를 듣고 영어 단어 말하기 (기존 방식)
+  - **단어 → 뜻 모드**: 영어 단어 TTS를 듣고 한국어 뜻 말하기 (신규)
+
+---
+
+### v1.3.1
+- ✅ 시험 화면 UI 개선
+- ✅ 뜻→단어 모드 기본 구조 완성
+- ✅ 가중치 기반 랜덤 문항 구성 (단기·장기 기억 단계별 가중치 적용)
+
+---
+
+### v1.3.0
+- ✅ 시험 탭 완성
+  - 태그별 시험 범위 선택
+  - 문항 수 선택 (50% / 100%)
+  - 단계별 문항 구성 미리보기
+  - 맞아요 / 틀렸네요 / 모르겠어요 응답
+  - 시험 완료 후 정오답 결과 화면
+
+---
+
+### v1.2.x
+- ✅ **플레이 탭** 완성
+  - 원어민 발음 + 한국어 뜻 TTS 자동 반복 재생
+  - 단어별 재생 속도 조절
+  - 태그 필터로 원하는 단어만 재생
+- ✅ **관리 탭** 완성
+  - 단어 목록 조회 / 수정 / 삭제
+  - 태그 관리
+  - 학습 통계 (단계별 단어 수)
+
+---
+
+### v1.1.x
+- ✅ **장기기억 시스템** 구축
+  - 단기3 → 단기7 → 단기15 → 장기30 → 장기60 → 장기120 단계
+  - 정답 시 승급, 오답 시 강등
+  - 시험 범위: 단기3~15 + 장기30 (장기60·120 제외)
+- ✅ Google TTS 원어민 발음 연동
+- ✅ 한국어 뜻 자동 조회 (Dictionary API)
+
+---
+
+### v1.0.0
+- ✅ **녹음 탭** — 음성 녹음 → STT 자동 인식 → 단어/뜻 정정 → 태그 지정 → 저장
+- ✅ 4탭 기본 구조 완성 (녹음 / 플레이 / 시험 / 관리)
+- ✅ 로컬 데이터 저장 (shared_preferences)
+- ✅ 서명된 릴리즈 APK 배포
+
+---
+
+## 🏗️ 기술 스택
+
+| 분류 | 내용 |
+|------|------|
+| Framework | Flutter 3.35.4 / Dart 3.9.2 |
+| 상태관리 | Provider |
+| 로컬 저장소 | shared_preferences 2.5.3 |
+| TTS | flutter_tts (한국어) + Google TTS API (영어) |
+| 음성 녹음 | record 6.2.1 |
+| 오디오 재생 | audioplayers 6.7.1 |
+| HTTP | http 1.5.0 |
+
+---
+
+## 📁 프로젝트 구조
+
+```
+lib/
+├── main.dart                  # 앱 진입점, 탭 구조
+├── theme.dart                 # 앱 테마 (색상, 스타일)
+├── models/
+│   └── word_entry.dart        # 단어 모델, 기억 단계 정의
+├── services/
+│   ├── word_store.dart        # 단어 데이터 관리 (Provider)
+│   ├── audio_service.dart     # TTS / 발음 재생
+│   ├── dictionary_service.dart# 한국어 뜻 조회
+│   └── voice_recorder.dart    # 음성 녹음 / STT
+└── screens/
+    ├── record_screen.dart     # 녹음 탭
+    ├── play_screen.dart       # 플레이 탭
+    ├── test_screen.dart       # 시험 탭
+    └── manage_screen.dart     # 관리 탭
+```
