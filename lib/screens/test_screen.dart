@@ -22,6 +22,7 @@ class _TestScreenState extends State<TestScreen> {
   // ── 시험 설정 ─────────────────────────────────────────────
   Set<String> _selectedTags = {};
   int? _targetCount; // null = 아직 미선택
+  String _examMode = 'meaning'; // 'meaning' = 뜻→단어 | 'word' = 단어→뜻
   bool _examStarted = false;
 
   // ── 시험 진행 ─────────────────────────────────────────────
@@ -587,23 +588,48 @@ class _TestScreenState extends State<TestScreen> {
                     style: TextStyle(
                         fontSize: 12, color: Colors.grey.shade600)),
                 const SizedBox(height: 10),
-                Text(
-                  q.word,
-                  style: const TextStyle(
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.deepIndigo),
-                ),
-                const SizedBox(height: 8),
-                // 원어민 발음 버튼
-                TextButton.icon(
-                  onPressed: () => AudioService()
-                      .pronounce(q.word, audioUrl: q.nativeAudioUrl),
-                  icon: const Icon(Icons.volume_up, size: 18),
-                  label: const Text('원어민 발음 듣기'),
-                  style: TextButton.styleFrom(
-                      foregroundColor: AppTheme.teal),
-                ),
+                if (_examMode == 'meaning') ...[
+                  // 뜻→단어 모드: 정답은 영어 단어
+                  Text(
+                    q.word,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.deepIndigo),
+                  ),
+                  const SizedBox(height: 4),
+                  TextButton.icon(
+                    onPressed: () => AudioService()
+                        .pronounce(q.word, audioUrl: q.nativeAudioUrl),
+                    icon: const Icon(Icons.volume_up, size: 18),
+                    label: const Text('원어민 발음 듣기'),
+                    style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.teal),
+                  ),
+                ] else ...[
+                  // 단어→뜻 모드: 정답은 한국어 뜻
+                  Text(
+                    q.meaning.isNotEmpty
+                        ? q.meaning.split('\n').first
+                        : '(뜻 없음)',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        height: 1.4),
+                  ),
+                  const SizedBox(height: 4),
+                  // 단어→뜻 모드에서도 영어 발음 한 번 더 들을 수 있게
+                  TextButton.icon(
+                    onPressed: () => AudioService()
+                        .pronounce(q.word, audioUrl: q.nativeAudioUrl),
+                    icon: const Icon(Icons.volume_up, size: 18),
+                    label: Text('${q.word} 발음 듣기'),
+                    style: TextButton.styleFrom(
+                        foregroundColor: AppTheme.teal),
+                  ),
+                ],
               ],
             ),
           ),
