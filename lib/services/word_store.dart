@@ -65,7 +65,7 @@ class WordStore extends ChangeNotifier {
 
   Future<void> renameTag(String oldTag, String newTag) async {
     final t = newTag.trim();
-    if (t.isEmpty || oldTag == t) return;
+    if (t.isEmpty || oldTag == t || _tags.contains(t)) return;
     // 태그 박스 갱신
     final keys = _tagsBox.keys.toList();
     for (final k in keys) {
@@ -73,11 +73,10 @@ class WordStore extends ChangeNotifier {
         await _tagsBox.put(k, t);
       }
     }
-    // 단어들의 태그 갱신
+    // 단어들의 태그 갱신 (새 List로 교체해서 unmodifiable 방지)
     for (final w in _words) {
-      final i = w.tags.indexOf(oldTag);
-      if (i >= 0) {
-        w.tags[i] = t;
+      if (w.tags.contains(oldTag)) {
+        w.tags = w.tags.map((tag) => tag == oldTag ? t : tag).toList();
         await _wordsBox.put(w.id, w.toMap());
       }
     }
@@ -95,7 +94,7 @@ class WordStore extends ChangeNotifier {
     }
     for (final w in _words) {
       if (w.tags.contains(tag)) {
-        w.tags.remove(tag);
+        w.tags = w.tags.where((t) => t != tag).toList();
         await _wordsBox.put(w.id, w.toMap());
       }
     }

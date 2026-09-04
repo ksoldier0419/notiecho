@@ -10,7 +10,7 @@ import 'screens/test_screen.dart';
 import 'screens/manage_screen.dart';
 
 /// 앱 버전 — pubspec.yaml 버전과 동기화해서 관리
-const String kAppVersion = '1.1.0';
+const String kAppVersion = '1.2.0';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

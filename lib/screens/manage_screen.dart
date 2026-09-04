@@ -254,37 +254,83 @@ class _ManageScreenState extends State<ManageScreen> {
   Future<void> _editWordDialog(WordStore store, WordEntry w) async {
     final wordCtrl = TextEditingController(text: w.word);
     final meaningCtrl = TextEditingController(text: w.meaning);
+    // 현재 태그 복사 (StatefulBuilder에서 setState 가능하게)
+    final selectedTags = Set<String>.from(w.tags);
+
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('단어 수정'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                controller: wordCtrl,
-                decoration: const InputDecoration(labelText: '단어')),
-            const SizedBox(height: 12),
-            TextField(
-                controller: meaningCtrl,
-                maxLines: 3,
-                minLines: 1,
-                decoration: const InputDecoration(labelText: '뜻')),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('단어 수정'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                    controller: wordCtrl,
+                    decoration: const InputDecoration(labelText: '단어')),
+                const SizedBox(height: 12),
+                TextField(
+                    controller: meaningCtrl,
+                    maxLines: 3,
+                    minLines: 1,
+                    decoration: const InputDecoration(labelText: '뜻')),
+                const SizedBox(height: 16),
+                // ── 태그 선택 ──
+                const Text('태그',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                if (store.tags.isEmpty)
+                  Text('태그 없음 (관리 탭에서 먼저 태그를 만드세요)',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade500))
+                else
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: store.tags.map((tag) {
+                      final isSel = selectedTags.contains(tag);
+                      return FilterChip(
+                        label: Text(tag,
+                            style: const TextStyle(fontSize: 12)),
+                        selected: isSel,
+                        selectedColor: AppTheme.lightTeal,
+                        checkmarkColor: AppTheme.deepIndigo,
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (v) {
+                          setDialogState(() {
+                            if (v) {
+                              selectedTags.add(tag);
+                            } else {
+                              selectedTags.remove(tag);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('취소')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('저장')),
           ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('취소')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('저장')),
-        ],
       ),
     );
     if (ok == true && wordCtrl.text.trim().isNotEmpty) {
       w.word = wordCtrl.text.trim();
       w.meaning = meaningCtrl.text.trim();
+      w.tags = selectedTags.toList();
       await store.updateWord(w);
     }
   }
