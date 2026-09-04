@@ -35,11 +35,32 @@ class _PlayScreenState extends State<PlayScreen> {
   bool _stopRequested = false;
 
   List<WordEntry> _filteredWords(WordStore store) {
-    return store.filter(
-      tag: _selectedTag,
-      date: _selectedDate,
-      stage: _stageFilter == 'all' ? null : _stageFilter,
+    // stage 필터: 'all'이면 null, 'short'/'long'이면 isLong으로 분기
+    bool? isLongFilter;
+    String? stageExact;
+    if (_stageFilter != 'all') {
+      if (_stageFilter == 'short') {
+        isLongFilter = false;
+      } else if (_stageFilter == 'long') {
+        isLongFilter = true;
+      } else {
+        stageExact = _stageFilter;
+      }
+    }
+    var result = store.filter(
+      tags: _selectedTag != null ? [_selectedTag!] : null,
+      stage: stageExact,
+      isLong: isLongFilter,
     );
+    // 날짜 필터 (word_store.filter에서 제거됐으므로 여기서 처리)
+    if (_selectedDate != null) {
+      final d = _selectedDate!;
+      result = result.where((w) =>
+          w.createdAt.year == d.year &&
+          w.createdAt.month == d.month &&
+          w.createdAt.day == d.day).toList();
+    }
+    return result;
   }
 
   List<WordEntry> _playlist(WordStore store) {
